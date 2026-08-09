@@ -1,0 +1,26 @@
+# Android
+android-app/.gradle/
+android-app/.idea/
+android-app/local.properties
+android-app/*/build/
+android-app/app/build/
+android-app/app/release/
+android-app/captures/
+android-app/*.iml
+android-app/.externalNativeBuild/
+android-app/.cxx/
+
+# Python
+pc-client/__pycache__/
+pc-client/*.pyc
+pc-client/venv/
+pc-client/.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output recordings/logs
+*.mp4
+*.flv
+*.log

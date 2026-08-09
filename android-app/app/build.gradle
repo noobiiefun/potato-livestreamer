@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.potato.livestreamer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.potato.livestreamer"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+
+    // FFmpeg for Android — runs the actual "listen + remux to RTMP" pipeline on-device.
+    // NOTE: ffmpeg-kit was archived by its maintainer in 2024. It still works fine for
+    // sideloaded APKs (not distributed via Play Store). If the Maven artifact below
+    // becomes unavailable, swap in a community fork or host the AAR locally.
+    implementation 'com.arthenica:ffmpeg-kit-https:6.0-2'
+}

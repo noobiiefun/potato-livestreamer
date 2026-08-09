@@ -1,0 +1,3 @@
+# pc_client.py currently only uses the Python standard library.
+# This file is kept for future additions (e.g. a GUI with PyQt/Tkinter-extras,
+# or a status dashboard).
