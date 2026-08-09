@@ -1,0 +1,2 @@
+- [x] Update FFmpeg dependency in `app/build.gradle`
+- [x] Verify build by running `./gradlew :app:assembleDebug`
