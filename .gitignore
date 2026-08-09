@@ -15,6 +15,8 @@ pc-client/__pycache__/
 pc-client/*.pyc
 pc-client/venv/
 pc-client/.venv/
+pc-client/*.exe
+pc-client/*.dll
 
 # Contains your YouTube Stream Key — never commit this
 pc-client/config.json
