@@ -1,111 +1,153 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp"
     android:background="@color/potato_cream">
-
-    <ImageView
-        android:id="@+id/logoImage"
-        android:layout_width="96dp"
-        android:layout_height="96dp"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="16dp"
-        android:src="@mipmap/ic_launcher"
-        android:contentDescription="@string/app_name" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="32dp"
-        android:text="@string/app_name"
-        android:textColor="@color/potato_brown"
-        android:textSize="22sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="RTMP URL (lengkap dengan stream key)"
-        android:textColor="@color/potato_brown"
-        android:textSize="13sp"
-        android:layout_marginBottom="4dp" />
-
-    <EditText
-        android:id="@+id/rtmpUrlInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="rtmp://a.rtmp.youtube.com/live2/xxxx-xxxx-xxxx-xxxx"
-        android:inputType="textUri"
-        android:maxLines="1"
-        android:padding="12dp"
-        android:background="@android:drawable/edit_text"
-        android:layout_marginBottom="8dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Port lokal (harus sama dengan pc_client.py, default 6000)"
-        android:textColor="@color/potato_brown"
-        android:textSize="13sp"
-        android:layout_marginBottom="4dp" />
-
-    <EditText
-        android:id="@+id/portInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="6000"
-        android:inputType="number"
-        android:maxLines="1"
-        android:padding="12dp"
-        android:background="@android:drawable/edit_text"
-        android:layout_marginBottom="24dp" />
-
-    <Button
-        android:id="@+id/startButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Start Listening"
-        android:backgroundTint="@color/potato_tan"
-        android:textColor="@color/white"
-        android:layout_marginBottom="8dp" />
-
-    <Button
-        android:id="@+id/stopButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Stop"
-        android:backgroundTint="@color/live_red"
-        android:textColor="@color/white"
-        android:enabled="false"
-        android:layout_marginBottom="24dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Status"
-        android:textColor="@color/potato_brown"
-        android:textStyle="bold"
-        android:layout_marginBottom="4dp" />
 
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="#22000000">
+        android:layout_height="match_parent">
 
-        <TextView
-            android:id="@+id/statusLog"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="12dp"
-            android:text="Menunggu perintah..."
-            android:textColor="@color/potato_brown"
-            android:fontFamily="monospace"
-            android:textSize="12sp" />
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <ImageView
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_gravity="center_horizontal"
+                android:src="@mipmap/ic_launcher"
+                android:contentDescription="@string/app_name" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="20dp"
+                android:text="@string/app_name"
+                android:textColor="@color/potato_brown"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Port Video (samakan dengan pc_client.py)"
+                android:textColor="@color/potato_brown"
+                android:textSize="12sp" />
+            <EditText
+                android:id="@+id/videoPortInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="6000"
+                android:inputType="number"
+                android:padding="10dp"
+                android:background="@android:drawable/edit_text"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Port Kontrol (samakan dengan pc_client.py)"
+                android:textColor="@color/potato_brown"
+                android:textSize="12sp" />
+            <EditText
+                android:id="@+id/controlPortInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="6001"
+                android:inputType="number"
+                android:padding="10dp"
+                android:background="@android:drawable/edit_text"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Posisi badge LIVE"
+                android:textColor="@color/potato_brown"
+                android:textSize="12sp" />
+            <Spinner
+                android:id="@+id/badgePositionSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp" />
+
+            <Button
+                android:id="@+id/startWaitingButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tunggu Koneksi PC"
+                android:backgroundTint="@color/potato_tan"
+                android:textColor="@color/white"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/connectionStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Belum terhubung."
+                android:textColor="@color/potato_brown"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <Button
+                android:id="@+id/goLiveButton"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="🔴 Go LIVE"
+                android:backgroundTint="@color/live_red"
+                android:textColor="@color/white"
+                android:enabled="false"
+                android:layout_marginBottom="8dp" />
+
+            <Button
+                android:id="@+id/stopButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Stop"
+                android:backgroundTint="@color/potato_brown"
+                android:textColor="@color/white"
+                android:enabled="false"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Log"
+                android:textColor="@color/potato_brown"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/statusLog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:background="#22000000"
+                android:text="Menunggu perintah..."
+                android:textColor="@color/potato_brown"
+                android:fontFamily="monospace"
+                android:textSize="11sp"
+                android:layout_marginTop="4dp" />
+
+        </LinearLayout>
     </ScrollView>
 
-</LinearLayout>
+    <TextView
+        android:id="@+id/liveBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        android:layout_gravity="top|end"
+        android:background="@color/live_red"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="4dp"
+        android:text="● LIVE"
+        android:textColor="@color/white"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+</FrameLayout>

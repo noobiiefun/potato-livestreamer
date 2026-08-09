@@ -2,59 +2,166 @@
 """
 Potato Livestreamer — PC client.
 
-This script does NOT talk to YouTube directly. It only:
-  1. Checks that an Android phone is connected via USB (adb).
-  2. Opens an `adb forward` tunnel over the USB cable.
-  3. Captures this PC's own screen with FFmpeg and sends the encoded H.264
-     stream as a TCP client into that tunnel.
+What this script does:
+  1. Asks for Stream URL + Stream Key (split fields, same as YouTube Studio's
+     "Stream setup help" dialog) ONCE, and saves them locally in config.json
+     so you don't have to re-enter them every time.
+  2. Lets you choose what to capture: full screen, a specific screen region
+     (useful for a second monitor), or a specific window (Windows only) —
+     e.g. your Zoom / Google Meet window — plus which audio device to include.
+  3. Opens the USB tunnel (adb forward) for both a video port and a small
+     control port.
+  4. Sends the Stream URL + Stream Key to the phone app over the control
+     port (the phone shows "Go LIVE" once it receives this — you don't type
+     any RTMP info on the phone).
+  5. Captures your PC screen (+ audio, if configured) with FFmpeg and sends
+     it to the phone over the video port.
+  6. If the connection drops (USB hiccup, phone app restarted, etc.), this
+     script automatically retries instead of just quitting — matching the
+     phone app's own auto-reconnect behaviour, so a brief interruption
+     doesn't require you to manually restart everything.
 
-The phone (running the Potato Livestreamer app, already in "Start Listening"
-mode) receives that stream on the other end and pushes it to YouTube using
-its own internet connection.
-
-    PC screen --(ffmpeg encode)--> tcp://127.0.0.1:PORT --(adb forward, USB)--> phone
+    PC screen [+ audio] --(ffmpeg encode, mpegts)--> tcp://127.0.0.1:VIDEO_PORT
+                                    --(adb forward, USB cable)-->
+                                        phone (remux only) --> RTMP --> YouTube
 
 Requirements:
   - Python 3.8+
   - ffmpeg available on PATH
   - adb (Android Platform Tools) available on PATH
-  - Phone connected via USB with USB debugging enabled, and the Potato
-    Livestreamer app already running in "Start Listening" state.
+  - Phone connected via USB with USB debugging enabled, Potato Livestreamer
+    app open and "Tunggu Koneksi PC" already pressed.
 """
 
 import argparse
+import json
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+CONFIG_PATH = Path(__file__).parent / "config.json"
 
 # ---------------------------------------------------------------------------
-# Quality settings — this PC does the encoding, so all quality/bitrate/FPS
-# knobs live here. The phone only remuxes (copies), it doesn't re-encode.
+# Default quality settings — the PC does the encoding, so all quality/bitrate
+# /FPS knobs live here. The phone only remuxes (copies), it doesn't re-encode.
 # ---------------------------------------------------------------------------
-VIDEO_SIZE = "1920x1080"
+DEFAULT_VIDEO_SIZE = "1920x1080"
 FRAMERATE = "30"
 VIDEO_BITRATE = "4500k"
 PRESET = "ultrafast"   # ultrafast/superfast/veryfast -> lower CPU, larger stream
 TUNE = "zerolatency"
 
-# TODO(audio): PC audio isn't captured in this starter script yet. To add it:
-#   Windows : add `-f dshow -i audio="<your virtual audio device>"` and mux with
-#             `-map 0:v -map 1:a` before the output.
-#   Linux   : add `-f pulse -i default` similarly.
-#   macOS   : add `-f avfoundation -i ":0"` (adjust device index) similarly.
-#   Then push AAC audio (`-c:a aac -b:a 128k`) alongside `-c:v copy` on the
-#   phone side (MainActivity.kt) so both streams get muxed into the FLV output.
 
+# ---------------------------------------------------------------------------
+# Config persistence
+# ---------------------------------------------------------------------------
+
+def load_config() -> dict:
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text())
+        except Exception:
+            print("⚠️ config.json rusak/tidak terbaca, akan dibuat ulang.")
+    return {}
+
+
+def save_config(config: dict):
+    CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    print(f"💾 Konfigurasi disimpan di {CONFIG_PATH.name}")
+
+
+def prompt_stream_config(existing: dict) -> dict:
+    print("\n--- Konfigurasi YouTube (sama seperti YouTube Studio > Go Live > Stream) ---")
+    default_url = existing.get("stream_url", "rtmp://a.rtmp.youtube.com/live2")
+    default_key_display = "(tersimpan, kosongkan untuk pakai yang lama)" if existing.get("stream_key") else "(kosong)"
+
+    stream_url = input(f"Stream URL [{default_url}]: ").strip() or default_url
+    stream_key = input(f"Stream key {default_key_display}: ").strip() or existing.get("stream_key", "")
+
+    if not stream_key:
+        print("❌ Stream key wajib diisi.")
+        sys.exit(1)
+
+    result = dict(existing)
+    result["stream_url"] = stream_url
+    result["stream_key"] = stream_key
+    return result
+
+
+def list_audio_devices():
+    system = platform.system()
+    print("\n(Daftar perangkat audio yang terdeteksi FFmpeg/OS di bawah ini)")
+    try:
+        if system == "Windows":
+            subprocess.run(["ffmpeg", "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"])
+        elif system == "Darwin":
+            subprocess.run(["ffmpeg", "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""])
+        elif system == "Linux":
+            subprocess.run(["pactl", "list", "short", "sources"])
+    except Exception as e:
+        print(f"(gagal menampilkan daftar device: {e})")
+
+
+def prompt_capture_config(existing: dict) -> dict:
+    system = platform.system()
+    config = dict(existing)
+
+    print("\n--- Sumber Capture di PC ---")
+    print("  1. Seluruh layar / area tertentu (mis. monitor kedua)")
+    print("  2. Jendela aplikasi tertentu, mis. Zoom / Google Meet  [Windows only]")
+    default_mode = existing.get("capture_mode", "1")
+    mode = input(f"Pilih [1/2] (default {default_mode}): ").strip() or default_mode
+    config["capture_mode"] = mode
+
+    if mode == "2":
+        if system != "Windows":
+            print("⚠️ Capture per-jendela pada starter ini hanya didukung di Windows (via gdigrab).")
+            print("   Fallback ke capture seluruh layar. Di Linux/macOS, gunakan opsi 'area tertentu'")
+            print("   dan posisikan window Zoom/Meet di area tersebut.")
+            config["capture_mode"] = "1"
+        else:
+            print("\n⚠️ Catatan: capture per-jendela via gdigrab kadang gagal (layar hitam) untuk")
+            print("   aplikasi yang pakai GPU rendering (termasuk beberapa versi Zoom/Chrome).")
+            print("   Kalau itu terjadi, pakai opsi 'area tertentu' sebagai alternatif yang lebih stabil.")
+            default_title = existing.get("window_title", "")
+            window_title = input(f"Judul jendela persis (lihat title bar) [{default_title}]: ").strip() or default_title
+            config["window_title"] = window_title
+
+    if config["capture_mode"] == "1":
+        use_region = input("Capture area/monitor tertentu saja, bukan seluruh layar utama? (y/N): ").strip().lower() == "y"
+        if use_region:
+            config["offset_x"] = input(f"Offset X [{existing.get('offset_x', 0)}]: ").strip() or str(existing.get("offset_x", 0))
+            config["offset_y"] = input(f"Offset Y [{existing.get('offset_y', 0)}]: ").strip() or str(existing.get("offset_y", 0))
+            config["capture_width"] = input(f"Lebar [{existing.get('capture_width', 1920)}]: ").strip() or str(existing.get("capture_width", 1920))
+            config["capture_height"] = input(f"Tinggi [{existing.get('capture_height', 1080)}]: ").strip() or str(existing.get("capture_height", 1080))
+        else:
+            config.pop("offset_x", None)
+            config.pop("offset_y", None)
+            config.pop("capture_width", None)
+            config.pop("capture_height", None)
+
+    print("\n--- Audio ---")
+    print("  Audio bersifat opsional. Kosongkan kalau tidak ingin ada suara di livestream.")
+    show_devices = input("Tampilkan daftar perangkat audio yang terdeteksi? (y/N): ").strip().lower() == "y"
+    if show_devices:
+        list_audio_devices()
+    default_audio = existing.get("audio_device", "")
+    audio_device = input(f"Nama/index perangkat audio [{default_audio or '(tanpa audio)'}]: ").strip()
+    config["audio_device"] = audio_device or default_audio
+
+    return config
+
+
+# ---------------------------------------------------------------------------
+# adb / device helpers
+# ---------------------------------------------------------------------------
 
 def check_tool(name: str) -> bool:
     return shutil.which(name) is not None
-
-
-def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    print(f"$ {' '.join(cmd)}")
-    return subprocess.run(cmd, **kwargs)
 
 
 def check_device_connected() -> bool:
@@ -63,7 +170,7 @@ def check_device_connected() -> bool:
     devices = [l for l in lines if l.split("\t")[-1].strip() == "device"]
     if not devices:
         print("❌ Tidak ada HP terdeteksi lewat adb. Cek:")
-        print("   - Kabel USB data (bukan cable charging-only)")
+        print("   - Kabel USB data (bukan kabel charging-only)")
         print("   - USB debugging aktif di HP")
         print("   - Mode USB di HP di-set ke 'File Transfer/MTP', bukan 'Charging only'")
         print("   - Popup 'Allow USB debugging?' di HP sudah di-Allow")
@@ -73,49 +180,137 @@ def check_device_connected() -> bool:
 
 
 def setup_adb_forward(port: int):
-    run(["adb", "forward", f"tcp:{port}", f"tcp:{port}"], check=True)
-    print(f"✅ adb forward tcp:{port} tcp:{port} aktif (tunnel lewat USB siap).")
+    subprocess.run(["adb", "forward", f"tcp:{port}", f"tcp:{port}"], check=True)
+    print(f"✅ adb forward tcp:{port} tcp:{port} aktif.")
 
 
-def build_capture_command(port: int) -> list[str]:
+# ---------------------------------------------------------------------------
+# Control channel — sends Stream URL + Stream Key to the phone app
+# ---------------------------------------------------------------------------
+
+def send_control_config(control_port: int, stream_url: str, stream_key: str, retries: int = 30) -> bool:
+    payload = json.dumps({"streamUrl": stream_url, "streamKey": stream_key}).encode() + b"\n"
+    for attempt in range(1, retries + 1):
+        try:
+            with socket.create_connection(("127.0.0.1", control_port), timeout=3) as s:
+                s.sendall(payload)
+                ack = s.recv(16)
+                if ack.strip() == b"OK":
+                    print("✅ Konfigurasi terkirim ke HP.")
+                    return True
+        except (ConnectionRefusedError, socket.timeout, OSError):
+            pass
+        print(f"⏳ Menunggu app HP siap menerima konfigurasi... ({attempt}/{retries})")
+        time.sleep(2)
+    print("❌ Gagal mengirim konfigurasi ke HP.")
+    print("   Pastikan app Potato Livestreamer sudah menekan 'Tunggu Koneksi PC'.")
+    return False
+
+
+# ---------------------------------------------------------------------------
+# FFmpeg command building
+# ---------------------------------------------------------------------------
+
+def build_video_input_args(config: dict) -> list:
     system = platform.system()
+    mode = config.get("capture_mode", "1")
 
-    base = [
-        "ffmpeg",
-        "-y",
-        "-framerate", FRAMERATE,
-        "-video_size", VIDEO_SIZE,
-    ]
+    if mode == "2" and system == "Windows" and config.get("window_title"):
+        return ["-f", "gdigrab", "-i", f"title={config['window_title']}"]
 
     if system == "Windows":
-        input_args = ["-f", "gdigrab", "-i", "desktop"]
-    elif system == "Darwin":  # macOS
-        # "1:none" = display index 1, no audio device. Adjust index with
-        # `ffmpeg -f avfoundation -list_devices true -i ""` if needed.
-        input_args = ["-f", "avfoundation", "-i", "1:none"]
+        return ["-f", "gdigrab", "-i", "desktop"]
+    elif system == "Darwin":
+        # Adjust device index with:
+        # ffmpeg -f avfoundation -list_devices true -i ""
+        return ["-f", "avfoundation", "-i", "1:none"]
     elif system == "Linux":
-        input_args = ["-f", "x11grab", "-i", ":0.0"]
+        display = ":0.0"
+        if config.get("offset_x") is not None and config.get("offset_y") is not None:
+            display = f":0.0+{config['offset_x']},{config['offset_y']}"
+        return ["-f", "x11grab", "-i", display]
     else:
-        print(f"❌ OS '{system}' belum didukung script ini. Sesuaikan build_capture_command().")
+        print(f"❌ OS '{system}' belum didukung script ini.")
         sys.exit(1)
 
-    encode_args = [
-        "-c:v", "libx264",
-        "-preset", PRESET,
-        "-tune", TUNE,
-        "-b:v", VIDEO_BITRATE,
-        "-pix_fmt", "yuv420p",
-        "-g", "60",
-        "-f", "h264",
-        f"tcp://127.0.0.1:{port}",
+
+def build_capture_command(config: dict, port: int) -> list:
+    system = platform.system()
+    cmd = ["ffmpeg", "-y", "-framerate", FRAMERATE]
+
+    if config.get("capture_mode") != "2":
+        width = config.get("capture_width") or DEFAULT_VIDEO_SIZE.split("x")[0]
+        height = config.get("capture_height") or DEFAULT_VIDEO_SIZE.split("x")[1]
+        cmd += ["-video_size", f"{width}x{height}"]
+        if system == "Windows" and config.get("offset_x") is not None and config.get("offset_y") is not None:
+            cmd += ["-offset_x", str(config["offset_x"]), "-offset_y", str(config["offset_y"])]
+
+    cmd += build_video_input_args(config)
+
+    audio_device = (config.get("audio_device") or "").strip()
+    has_audio = bool(audio_device)
+    if has_audio:
+        if system == "Windows":
+            cmd += ["-f", "dshow", "-i", f"audio={audio_device}"]
+        elif system == "Darwin":
+            cmd += ["-f", "avfoundation", "-i", f":{audio_device}"]
+        elif system == "Linux":
+            cmd += ["-f", "pulse", "-i", audio_device]
+
+    cmd += [
+        "-c:v", "libx264", "-preset", PRESET, "-tune", TUNE,
+        "-b:v", VIDEO_BITRATE, "-pix_fmt", "yuv420p", "-g", "60",
     ]
+    if has_audio:
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-map", "0:v", "-map", "1:a"]
 
-    return base + input_args + encode_args
+    # mpegts (not raw h264) so an optional audio track can travel alongside
+    # video in one stream — the phone side just does "-c copy" on whatever
+    # tracks are present.
+    cmd += ["-f", "mpegts", f"tcp://127.0.0.1:{port}"]
+    return cmd
 
+
+# ---------------------------------------------------------------------------
+# Capture loop with auto-retry (mirrors the phone's own auto-reconnect)
+# ---------------------------------------------------------------------------
+
+def run_capture_loop(config: dict, port: int):
+    print("\n🎥 Memulai capture & pengiriman ke HP (Ctrl+C untuk berhenti total)...\n")
+    backoff = 2.0
+    while True:
+        cmd = build_capture_command(config, port)
+        print(f"$ {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd)
+            if result.returncode == 0:
+                print("ℹ️ FFmpeg berhenti normal.")
+            else:
+                print(f"⚠️ FFmpeg berhenti dengan kode {result.returncode} (kemungkinan koneksi ke HP terputus).")
+        except FileNotFoundError:
+            print("❌ ffmpeg tidak ditemukan.")
+            return
+        except KeyboardInterrupt:
+            print("\n⏹️ Dihentikan oleh pengguna.")
+            return
+
+        print(f"🔁 Mencoba menyambung ulang dalam {backoff:.0f} detik... (Ctrl+C untuk berhenti total)")
+        try:
+            time.sleep(backoff)
+        except KeyboardInterrupt:
+            return
+        backoff = min(backoff * 1.5, 15)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Potato Livestreamer — PC client")
-    parser.add_argument("--port", type=int, default=6000, help="Port lokal (harus sama dengan yang di-set di app HP)")
+    parser.add_argument("--video-port", type=int, default=6000, help="Port video (samakan dengan app HP)")
+    parser.add_argument("--control-port", type=int, default=6001, help="Port kontrol (samakan dengan app HP)")
+    parser.add_argument("--reconfigure", action="store_true", help="Paksa tanya ulang semua konfigurasi")
     args = parser.parse_args()
 
     print("🥔 Potato Livestreamer — PC client\n")
@@ -130,22 +325,26 @@ def main():
     if not check_device_connected():
         sys.exit(1)
 
-    setup_adb_forward(args.port)
+    config = load_config()
+    if args.reconfigure or "stream_key" not in config:
+        config = prompt_stream_config(config)
+        config = prompt_capture_config(config)
+        save_config(config)
+    else:
+        print(f"ℹ️ Memakai konfigurasi tersimpan (Stream URL: {config['stream_url']}).")
+        print("   Jalankan dengan --reconfigure untuk mengubah Stream URL/Key/sumber capture.")
 
-    print("\n⚠️  Pastikan app Potato Livestreamer di HP SUDAH ditekan 'Start Listening'")
-    print("    sebelum lanjut, supaya FFmpeg di HP sudah menunggu koneksi.")
-    input("    Tekan Enter untuk mulai capture & kirim layar PC...\n")
+    setup_adb_forward(args.video_port)
+    setup_adb_forward(args.control_port)
 
-    cmd = build_capture_command(args.port)
-    print("🎥 Memulai capture layar & mengirim ke HP...\n")
+    print("\n⚠️ Pastikan app Potato Livestreamer di HP sudah menekan 'Tunggu Koneksi PC'.")
+    if not send_control_config(args.control_port, config["stream_url"], config["stream_key"]):
+        sys.exit(1)
 
-    try:
-        run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"\n❌ FFmpeg berhenti dengan error (exit code {e.returncode}).")
-        print("   Cek apakah app di HP masih dalam status 'Listening' dan port cocok.")
-    except KeyboardInterrupt:
-        print("\n⏹️ Dihentikan oleh pengguna.")
+    print("\n👉 Sekarang tekan tombol '🔴 Go LIVE' di HP, lalu tekan Enter di sini untuk mulai capture.")
+    input()
+
+    run_capture_loop(config, args.video_port)
 
 
 if __name__ == "__main__":
