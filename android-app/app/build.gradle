@@ -43,8 +43,7 @@ dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
 
     // FFmpeg for Android — runs the actual "listen + remux to RTMP" pipeline on-device.
-    // NOTE: ffmpeg-kit was archived by its maintainer in 2024. It still works fine for
-    // sideloaded APKs (not distributed via Play Store). If the Maven artifact below
-    // becomes unavailable, swap in a community fork or host the AAR locally.
-    implementation 'com.arthenica:ffmpeg-kit-https:6.0-2'
+    // NOTE: ffmpeg-kit was archived by its maintainer in 2024.
+    // Switched to community fork 'maitrungduc1410' because original artifacts were removed from Maven Central.
+    implementation 'io.github.maitrungduc1410:ffmpeg-kit-https:8.1.2'
 }
