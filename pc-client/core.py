@@ -1,6 +1,18 @@
 """
 Potato Livestreamer — logika inti sisi PC.
 
+ARSITEKTUR (v3): PC ringan, HP yang kerja berat.
+  - PC cuma capture layar dan compress ke MJPEG (cepat, murah CPU — tidak
+    mengganggu game yang sedang jalan). TIDAK ada H.264 encode di PC.
+  - HP menerima MJPEG itu, decode framenya, lalu ENCODE ke H.264 memakai
+    hardware encoder Android (h264_mediacodec) — persis seperti proses
+    "merekam layar", tapi hasilnya langsung dialirkan ke RTMP/YouTube
+    alih-alih disimpan ke file.
+
+Konsekuensi: MJPEG jauh lebih besar dari H.264 per frame, jadi ini lebih
+boros bandwidth USB dibanding versi sebelumnya (PC encode + HP remux) — tapi
+PC-nya sendiri hampir tidak terbebani sama sekali.
+
 Dipakai oleh pc_client_gui.py (rekomendasi, ada UI) dan pc_client.py (CLI,
 untuk yang lebih suka terminal / scripting). Tidak ada logika UI di sini
 supaya kedua versi tetap konsisten.
@@ -27,8 +39,18 @@ RESOLUTION_PRESETS = {
     "1080p (1920x1080)": (1920, 1080),
 }
 
-# Preset bitrate kasar per level kualitas (kbps). Dipakai untuk video 30fps;
-# untuk 60fps sebaiknya dinaikkan manual di UI kalau perlu.
+# Kualitas MJPEG yang dikirim PC -> HP lewat USB. Skala ffmpeg -q:v: 2 = terbaik
+# (file besar), 31 = terburuk (file kecil). Ini yang paling menentukan beban
+# USB — makin tinggi kualitas, makin besar data yang harus muat di adb forward.
+MJPEG_QUALITY_PRESETS = {
+    "Hemat USB (kualitas rendah)": 12,
+    "Seimbang (disarankan)": 6,
+    "Kualitas tinggi (USB harus kencang)": 3,
+}
+
+# Target bitrate H.264 FINAL yang di-encode HP sebelum dikirim ke YouTube
+# (kbps). Ini dikirim ke HP lewat control channel, dipakai di command ffmpeg
+# HP (-b:v), TIDAK dipakai di sisi PC lagi.
 BITRATE_PRESETS = {
     "Rendah (hemat data)": {"480p": 800, "720p": 1500, "1080p": 2500},
     "Sedang (disarankan)": {"480p": 1200, "720p": 2500, "1080p": 4500},
@@ -36,9 +58,6 @@ BITRATE_PRESETS = {
 }
 
 FPS_OPTIONS = ["24", "30", "60"]
-
-PRESET_SPEED = "ultrafast"  # ultrafast/superfast/veryfast -> lebih ringan CPU
-TUNE = "zerolatency"
 
 
 # ---------------------------------------------------------------------------
@@ -177,12 +196,18 @@ def list_window_titles() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Control channel — kirim Stream URL + Stream Key ke HP
+# Control channel — kirim Stream URL + Stream Key + target bitrate H.264 ke HP
+# (HP yang akan encode, jadi dia perlu tahu target bitrate output-nya)
 # ---------------------------------------------------------------------------
 
 def send_control_config(control_port: int, stream_url: str, stream_key: str,
+                         video_bitrate_kbps: int = 2500,
                          retries: int = 30, delay: float = 2.0, on_attempt=None) -> tuple[bool, str]:
-    payload = json.dumps({"streamUrl": stream_url, "streamKey": stream_key}).encode() + b"\n"
+    payload = json.dumps({
+        "streamUrl": stream_url,
+        "streamKey": stream_key,
+        "videoBitrateKbps": video_bitrate_kbps,
+    }).encode() + b"\n"
     for attempt in range(1, retries + 1):
         if on_attempt:
             on_attempt(attempt, retries)
@@ -199,7 +224,8 @@ def send_control_config(control_port: int, stream_url: str, stream_key: str,
 
 
 # ---------------------------------------------------------------------------
-# FFmpeg command building
+# FFmpeg command building — sisi PC HANYA capture + compress MJPEG (murah),
+# TIDAK encode H.264. HP yang melakukan decode + H.264 encode (hardware).
 # ---------------------------------------------------------------------------
 
 def build_video_input_args(config: dict) -> list[str]:
@@ -235,25 +261,16 @@ def build_capture_command(config: dict, video_port: int) -> list[str]:
 
     cmd += build_video_input_args(config)
 
-    audio_device = (config.get("audio_device") or "").strip()
-    has_audio = bool(audio_device)
-    if has_audio:
-        if system == "Windows":
-            cmd += ["-f", "dshow", "-i", f"audio={audio_device}"]
-        elif system == "Darwin":
-            cmd += ["-f", "avfoundation", "-i", f":{audio_device}"]
-        elif system == "Linux":
-            cmd += ["-f", "pulse", "-i", audio_device]
+    # NOTE (audio): belum didukung di versi arsitektur ini. MJPEG adalah
+    # video-only elementary stream, tidak bisa membawa audio dalam 1 koneksi
+    # sederhana seperti mpegts dulu. Rencana lanjutan: buka port TCP kedua
+    # khusus audio (AAC) dan HP mux dua sumber itu bareng saat encode.
+    # audio_device = (config.get("audio_device") or "").strip()
 
-    bitrate_kbps = config.get("bitrate_kbps", 2500)
-    cmd += [
-        "-c:v", "libx264", "-preset", PRESET_SPEED, "-tune", TUNE,
-        "-b:v", f"{bitrate_kbps}k", "-pix_fmt", "yuv420p", "-g", str(int(config.get("fps", 30)) * 2),
-    ]
-    if has_audio:
-        cmd += ["-c:a", "aac", "-b:a", "128k", "-map", "0:v", "-map", "1:a"]
+    mjpeg_q = config.get("mjpeg_quality", 6)  # 2=terbaik/besar, 31=terburuk/kecil
+    cmd += ["-c:v", "mjpeg", "-q:v", str(mjpeg_q)]
 
-    # mpegts supaya video+audio (kalau ada) bisa lewat 1 koneksi TCP dan
-    # di-remux apa adanya (-c copy) di HP tanpa perlu tahu ada audio atau tidak.
-    cmd += ["-f", "mpegts", f"tcp://127.0.0.1:{video_port}"]
+    # MJPEG elementary stream: barisan gambar JPEG yang disambung langsung,
+    # dikirim mentah lewat TCP ke HP. HP yang decode & encode ulang.
+    cmd += ["-f", "mjpeg", f"tcp://127.0.0.1:{video_port}"]
     return cmd

@@ -90,7 +90,14 @@ class PotatoLivestreamerGUI:
         self.fps_var = tk.StringVar(value=self.config_data.get("fps", "30"))
         ttk.Combobox(col2, textvariable=self.fps_var, values=core.FPS_OPTIONS, state="readonly").pack(fill="x")
 
-        self._label(form, "Kualitas / Bitrate")
+        self._label(form, "Kualitas Capture PC → HP (lewat USB)")
+        self.mjpeg_quality_var = tk.StringVar(value=self.config_data.get("mjpeg_quality_preset", "Seimbang (disarankan)"))
+        ttk.Combobox(form, textvariable=self.mjpeg_quality_var,
+                     values=list(core.MJPEG_QUALITY_PRESETS.keys()), state="readonly").pack(fill="x", pady=(0, 4))
+        tk.Label(form, text="Ini beban ke kabel USB, bukan ke YouTube. Turunkan kalau lag.",
+                 bg=APP_BG, fg=BROWN, font=("Segoe UI", 8, "italic")).pack(anchor="w", pady=(0, 10))
+
+        self._label(form, "Kualitas / Bitrate Video ke YouTube (di-encode HP)")
         self.bitrate_var = tk.StringVar(value=self.config_data.get("bitrate_preset", "Sedang (disarankan)"))
         ttk.Combobox(form, textvariable=self.bitrate_var,
                      values=list(core.BITRATE_PRESETS.keys()), state="readonly").pack(fill="x", pady=(0, 12))
@@ -133,14 +140,13 @@ class PotatoLivestreamerGUI:
         self._on_capture_mode_change()  # tampilkan frame yang sesuai di awal
 
         # --- Audio -----------------------------------------------------------------
-        self._label(form, "Perangkat Audio (opsional)")
-        audio_row = tk.Frame(form, bg=APP_BG)
-        audio_row.pack(fill="x", pady=(0, 12))
-        self.audio_device_var = tk.StringVar(value=self.config_data.get("audio_device", "Tanpa Audio"))
-        self.audio_combo = ttk.Combobox(audio_row, textvariable=self.audio_device_var, state="readonly", width=38)
-        self.audio_combo["values"] = ["Tanpa Audio"]
-        self.audio_combo.pack(side="left", fill="x", expand=True)
-        tk.Button(audio_row, text="🔄 Refresh", command=self._refresh_audio).pack(side="left", padx=4)
+        audio_note = tk.Label(
+            form,
+            text="🔇 Audio belum didukung di arsitektur ini (PC kirim MJPEG video-only).\n"
+                 "Rencana lanjutan: jalur audio terpisah — lihat README.",
+            bg=APP_BG, fg=BROWN, font=("Segoe UI", 9, "italic"), justify="left", anchor="w",
+        )
+        audio_note.pack(fill="x", pady=(0, 12))
 
         # --- Ports (advanced) -------------------------------------------------------
         ports_row = tk.Frame(form, bg=APP_BG)
@@ -192,25 +198,8 @@ class PotatoLivestreamerGUI:
             self.window_frame.pack(fill="x", pady=(0, 8))
 
     # ------------------------------------------------------------------
-    # Refresh buttons (audio devices, window titles)
+    # Refresh button (window titles)
     # ------------------------------------------------------------------
-
-    def _refresh_audio(self):
-        self._log("🔍 Mencari perangkat audio...")
-
-        def worker():
-            devices = core.list_audio_devices()
-            self.root.after(0, lambda: self._apply_audio_list(devices))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_audio_list(self, devices: list[str]):
-        values = ["Tanpa Audio"] + devices
-        self.audio_combo["values"] = values
-        if not devices:
-            self._log("⚠️ Tidak ada perangkat audio terdeteksi (atau OS belum didukung fitur ini).")
-        else:
-            self._log(f"✅ Ditemukan {len(devices)} perangkat audio.")
 
     def _refresh_windows(self):
         self._log("🔍 Mencari jendela aplikasi yang terbuka...")
@@ -249,9 +238,10 @@ class PotatoLivestreamerGUI:
         res_key = resolution_label.split(" ")[0]  # "720p (1280x720)" -> "720p"
         bitrate_kbps = core.BITRATE_PRESETS.get(bitrate_label, {}).get(res_key, 2500)
 
+        mjpeg_label = self.mjpeg_quality_var.get()
+        mjpeg_quality = core.MJPEG_QUALITY_PRESETS.get(mjpeg_label, 6)
+
         capture_mode = self.capture_mode_var.get()
-        audio_selected = self.audio_device_var.get()
-        audio_device = "" if audio_selected in ("Tanpa Audio", "") else audio_selected
 
         config = {
             "stream_url": stream_url,
@@ -260,10 +250,11 @@ class PotatoLivestreamerGUI:
             "fps": self.fps_var.get(),
             "bitrate_preset": bitrate_label,
             "bitrate_kbps": bitrate_kbps,
+            "mjpeg_quality_preset": mjpeg_label,
+            "mjpeg_quality": mjpeg_quality,
             "width": width,
             "height": height,
             "capture_mode": capture_mode,
-            "audio_device": audio_device,
             "video_port": int(self.video_port_var.get() or 6000),
             "control_port": int(self.control_port_var.get() or 6001),
         }
@@ -342,7 +333,8 @@ class PotatoLivestreamerGUI:
             self._log(f"⏳ Menunggu HP siap menerima konfigurasi... ({attempt}/{total})")
 
         ok, msg = core.send_control_config(
-            config["control_port"], config["stream_url"], config["stream_key"], on_attempt=on_attempt
+            config["control_port"], config["stream_url"], config["stream_key"],
+            video_bitrate_kbps=config["bitrate_kbps"], on_attempt=on_attempt
         )
         self._log(("✅ " if ok else "❌ ") + msg)
         if not ok:

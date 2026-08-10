@@ -85,7 +85,19 @@ def prompt_capture_config(existing: dict) -> dict:
     fps = input(f"FPS [{core.FPS_OPTIONS}] (default 30): ").strip() or "30"
     config["fps"] = fps
 
-    print("\nKualitas:")
+    print("\nKualitas Capture PC -> HP (beban ke kabel USB, turunkan kalau lag):")
+    m_keys = list(core.MJPEG_QUALITY_PRESETS.keys())
+    for i, k in enumerate(m_keys, 1):
+        print(f"  {i}. {k}")
+    m_choice = input("Pilih [2]: ").strip() or "2"
+    try:
+        mjpeg_label = m_keys[int(m_choice) - 1]
+    except (ValueError, IndexError):
+        mjpeg_label = m_keys[1]
+    config["mjpeg_quality_preset"] = mjpeg_label
+    config["mjpeg_quality"] = core.MJPEG_QUALITY_PRESETS[mjpeg_label]
+
+    print("\nKualitas / Bitrate Video ke YouTube (di-encode HP):")
     b_keys = list(core.BITRATE_PRESETS.keys())
     for i, k in enumerate(b_keys, 1):
         print(f"  {i}. {k}")
@@ -95,28 +107,8 @@ def prompt_capture_config(existing: dict) -> dict:
     except (ValueError, IndexError):
         bitrate_label = b_keys[1]
     res_key = resolution_label.split(" ")[0]
+    config["bitrate_preset"] = bitrate_label
     config["bitrate_kbps"] = core.BITRATE_PRESETS[bitrate_label].get(res_key, 2500)
-
-    print("\n--- Audio (opsional) ---")
-    show = input("Tampilkan daftar perangkat audio? (y/N): ").strip().lower() == "y"
-    if show:
-        devices = core.list_audio_devices()
-        if devices:
-            for i, d in enumerate(devices, 1):
-                print(f"  {i}. {d}")
-            idx = input("Pilih nomor perangkat (kosongkan untuk tanpa audio): ").strip()
-            if idx:
-                try:
-                    config["audio_device"] = devices[int(idx) - 1]
-                except (ValueError, IndexError):
-                    config["audio_device"] = ""
-            else:
-                config["audio_device"] = ""
-        else:
-            print("⚠️ Tidak ada perangkat audio terdeteksi.")
-            config["audio_device"] = ""
-    else:
-        config["audio_device"] = existing.get("audio_device", "")
 
     return config
 
@@ -190,6 +182,7 @@ def main():
     print("\n⚠️ Pastikan app Potato Livestreamer di HP sudah menekan 'Tunggu Koneksi PC'.")
     ok, msg = core.send_control_config(
         args.control_port, config["stream_url"], config["stream_key"],
+        video_bitrate_kbps=config.get("bitrate_kbps", 2500),
         on_attempt=lambda a, t: print(f"⏳ Menunggu HP siap... ({a}/{t})"),
     )
     print(("✅ " if ok else "❌ ") + msg)

@@ -13,6 +13,15 @@ android {
         targetSdk 34
         versionCode 1
         versionName "0.1.0"
+
+        // IMPORTANT for low-end / Android Go devices (e.g. Xiaomi A3): many budget
+        // phones run a 32-bit-only system image even on 64-bit-capable chips, to
+        // save RAM. Explicitly keep both 32-bit and 64-bit ARM native libs so the
+        // installer doesn't reject the APK with INSTALL_FAILED_NO_MATCHING_ABIS.
+        // Do NOT restrict this to arm64-v8a only.
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
     }
 
     buildTypes {
@@ -43,7 +52,10 @@ dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
 
     // FFmpeg for Android — runs the actual "listen + remux to RTMP" pipeline on-device.
-    // NOTE: ffmpeg-kit was archived by its maintainer in 2024.
-    // We use a community-maintained fork that supports 16KB page sizes and modern Android.
-    implementation 'dev.ffmpegkit-maintained:ffmpeg-kit-https:8.1.7'
+    // The original com.arthenica:ffmpeg-kit-* artifacts were removed from Maven
+    // Central in 2025 (project retired). This uses a verified, actively
+    // maintained community rebuild that still publishes multi-ABI .aar files
+    // (including armeabi-v7a, needed for 32-bit Android Go devices).
+    // See: https://github.com/maitrungduc1410/ffmpeg-kit
+    implementation 'io.github.maitrungduc1410:ffmpeg-kit-https:8.1.2'
 }

@@ -19,21 +19,28 @@ import com.arthenica.ffmpegkit.Statistics
 /**
  * Potato Livestreamer — Android side.
  *
+ * ARSITEKTUR (v3): PC ringan, HP yang kerja berat.
+ *   - PC hanya capture layar dan compress ke MJPEG (murah CPU, tidak
+ *     mengganggu game yang sedang berjalan di PC). PC TIDAK melakukan
+ *     H.264 encode sama sekali.
+ *   - HP (di sinilah kita) menerima MJPEG itu lewat video port, lalu
+ *     mendecode setiap frame-nya dan meng-ENCODE ke H.264 memakai hardware
+ *     encoder Android (`h264_mediacodec`) — mirip proses "merekam layar",
+ *     tapi hasilnya langsung dialirkan ke RTMP/YouTube, bukan disimpan ke
+ *     file. Ini pekerjaan yang nyata — makanya HP jadi panas/baterai
+ *     terpakai, beda dari versi lama yang cuma remux (lewatin) doang.
+ *
  * Flow:
- *   1. User taps "Tunggu Koneksi PC" -> opens a small control server (see
- *      ControlServer.kt) that waits for the PC to send Stream URL + Stream Key
- *      over the USB tunnel (adb forward on the control port).
- *   2. Once config arrives, "Go LIVE" becomes enabled.
- *   3. User taps "Go LIVE" -> starts FFmpeg listening on the video port for
- *      the H.264/AAC stream sent by the PC (mpegts container), and remuxes it
- *      (no re-encode, -c copy) straight into an RTMP push to YouTube using
- *      this phone's own network connection.
- *   4. Resilience: if the video session drops unexpectedly (USB hiccup, PC
- *      app restarted, etc.) and the user did NOT press Stop, the app does
- *      NOT go idle — it automatically re-listens and resumes, so a brief
- *      disconnect doesn't require the user to manually restart anything.
- *      Note: this minimizes downtime but can't guarantee a fully seamless
- *      broadcast on YouTube's side if the gap is long — see README.
+ *   1. User tekan "Tunggu Koneksi PC" -> buka ControlServer, menunggu PC
+ *      mengirim Stream URL + Stream Key + target bitrate H.264.
+ *   2. Begitu config diterima, "Go LIVE" aktif.
+ *   3. User tekan "Go LIVE" -> FFmpeg mulai listen di video port, menunggu
+ *      MJPEG stream dari PC, decode + encode H.264 (hardware) + push RTMP.
+ *   4. Resilience: kalau sesi terputus tak terduga (USB goyang, dsb) dan
+ *      user belum menekan Stop, sesi otomatis di-restart, bukan langsung
+ *      idle — supaya gangguan sesaat tidak memutus LIVE sepenuhnya.
+ *
+ * CATATAN: audio belum didukung di versi ini — PC mengirim video-only MJPEG.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -52,6 +59,7 @@ class MainActivity : AppCompatActivity() {
 
     private var receivedStreamUrl: String? = null
     private var receivedStreamKey: String? = null
+    private var receivedBitrateKbps: Int = 2500
 
     @Volatile private var userStopped = true
 
@@ -92,13 +100,14 @@ class MainActivity : AppCompatActivity() {
         controlServer?.stop()
         controlServer = ControlServer(
             port = controlPort,
-            onConfigReceived = { streamUrl, streamKey ->
+            onConfigReceived = { streamUrl, streamKey, videoBitrateKbps ->
                 receivedStreamUrl = streamUrl
                 receivedStreamKey = streamKey
+                receivedBitrateKbps = videoBitrateKbps
                 runOnUiThread {
                     connectionStatus.text = "✅ Terhubung ke PC. Siap LIVE."
                     goLiveButton.isEnabled = true
-                    log("📥 Konfigurasi (Stream URL + Key) diterima dari PC.")
+                    log("📥 Konfigurasi diterima dari PC (Stream URL + Key, target bitrate ${videoBitrateKbps}kbps).")
                 }
             },
             onLog = { msg -> log(msg) }
@@ -107,7 +116,7 @@ class MainActivity : AppCompatActivity() {
 
         connectionStatus.text = "⏳ Menunggu PC menyambung (port $controlPort)..."
         log("🔌 Menunggu koneksi kontrol dari PC di port $controlPort")
-        log("   Jalankan pc_client.py di PC sekarang (pastikan 'adb forward' sudah aktif).")
+        log("   Jalankan pc_client.py / pc_client_gui.py di PC sekarang.")
         startWaitingButton.isEnabled = false
     }
 
@@ -128,24 +137,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Starts (or restarts) the FFmpeg "listen for PC, remux to RTMP" session.
+     * Starts (or restarts) the FFmpeg session: listen for MJPEG from PC,
+     * decode it, encode to H.264 with the phone's hardware encoder
+     * (h264_mediacodec), and push to RTMP.
+     *
      * On unexpected termination (and only if the user hasn't pressed Stop),
-     * this re-calls itself after a short delay instead of going idle — this
-     * is the resilience behaviour requested: brief USB/network hiccups don't
-     * kill the live session, they just cause a short automatic retry.
+     * this re-calls itself after a short delay instead of going idle — brief
+     * USB/network hiccups cause a short automatic retry, not a full stop.
      */
     private fun startFfmpegListenLoop(videoPort: String, fullRtmpUrl: String, isRetry: Boolean) {
         if (userStopped) return
 
-        // Input is mpegts (not raw h264) because the PC client may include an
-        // AAC audio track alongside the video — mpegts supports muxed A/V and
-        // is copy-safe end to end. "-c copy" copies whatever streams exist
-        // (video-only or video+audio) without re-encoding on the phone.
-        val command = "-f mpegts -i tcp://0.0.0.0:$videoPort?listen=1 -c copy -f flv $fullRtmpUrl"
+        // Input: MJPEG elementary stream (sequence of JPEG frames) from PC.
+        // -c:v h264_mediacodec: HARDWARE H.264 encoder built into the phone's
+        //   chipset — this is the actual "recording" work this phone does.
+        //   (Software x264 isn't available in the LGPL-only ffmpeg-kit build
+        //   this app uses, and would be far too slow on a budget phone anyway.)
+        // -b:v: target bitrate the PC told us to aim for (YouTube quality).
+        val command = "-f mjpeg -i tcp://0.0.0.0:$videoPort?listen=1 " +
+            "-c:v h264_mediacodec -b:v ${receivedBitrateKbps}k -f flv $fullRtmpUrl"
 
-        log(if (isRetry) "🔁 Mencoba menyambung ulang ke PC..." else "▶️ Menunggu koneksi video dari PC di port $videoPort ...")
+        log(if (isRetry) "🔁 Mencoba menyambung ulang ke PC..." else "▶️ Menunggu koneksi MJPEG dari PC di port $videoPort ...")
         if (!isRetry) {
-            log("   Di PC, jalankan/lanjutkan pc_client.py sekarang.")
+            log("   Di PC, jalankan/lanjutkan pc_client_gui.py sekarang.")
+            log("   HP akan decode + encode H.264 (hardware) sendiri — ini yang bikin HP kerja/panas.")
         }
 
         activeSession = FFmpegKit.executeAsync(
@@ -163,7 +178,8 @@ class MainActivity : AppCompatActivity() {
                     if (ReturnCode.isSuccess(returnCode)) {
                         log("ℹ️ Sesi video berakhir, menunggu koneksi baru dari PC...")
                     } else {
-                        log("⚠️ Koneksi terputus (kemungkinan USB/PC tidak stabil).")
+                        log("⚠️ Koneksi terputus atau encoder gagal (kemungkinan USB tidak stabil,")
+                        log("   atau chip HP tidak mendukung h264_mediacodec — cek log lengkap kalau berulang).")
                         log("   LIVE TIDAK dimatikan — mencoba menyambung ulang otomatis dalam 2 detik...")
                     }
 
@@ -178,7 +194,7 @@ class MainActivity : AppCompatActivity() {
             { /* raw ffmpeg log lines go to Logcat by default */ },
             { statistics: Statistics ->
                 runOnUiThread {
-                    connectionStatus.text = "🔴 LIVE — bitrate ${statistics.bitrate} kbits/s"
+                    connectionStatus.text = "🔴 LIVE — encoding ${statistics.videoFps} fps, bitrate ${statistics.bitrate} kbits/s"
                 }
             }
         )

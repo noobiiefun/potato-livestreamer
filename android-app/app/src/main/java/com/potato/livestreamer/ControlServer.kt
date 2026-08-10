@@ -10,18 +10,21 @@ import java.net.Socket
  * Tiny local control channel, separate from the video port.
  *
  * The PC sends a single JSON line once it has connected:
- *   {"streamUrl":"rtmp://a.rtmp.youtube.com/live2","streamKey":"xxxx-xxxx-xxxx-xxxx"}
+ *   {"streamUrl":"rtmp://a.rtmp.youtube.com/live2","streamKey":"xxxx-xxxx-xxxx-xxxx","videoBitrateKbps":2500}
  *
- * This lets the Stream URL / Stream Key be entered once on the PC side
- * (same split fields YouTube Studio itself uses) instead of being typed into
- * the phone. The phone just waits, receives it, and shows the "Go LIVE" button.
+ * This lets the Stream URL / Stream Key / target bitrate be entered once on
+ * the PC side (same split fields YouTube Studio itself uses) instead of
+ * being typed into the phone. The phone just waits, receives it, and shows
+ * the "Go LIVE" button. videoBitrateKbps matters here because THIS PHONE is
+ * the one doing the H.264 encode (see MainActivity) — the PC only sends
+ * cheap MJPEG frames, so it must tell the phone what output bitrate to use.
  *
  * The server keeps accepting new connections after each one, so the PC can
  * safely resend the config on every reconnect attempt without breaking anything.
  */
 class ControlServer(
     private val port: Int,
-    private val onConfigReceived: (streamUrl: String, streamKey: String) -> Unit,
+    private val onConfigReceived: (streamUrl: String, streamKey: String, videoBitrateKbps: Int) -> Unit,
     private val onLog: (String) -> Unit
 ) {
     @Volatile private var running = false
@@ -55,8 +58,9 @@ class ControlServer(
                 val json = JSONObject(line)
                 val streamUrl = json.optString("streamUrl", "")
                 val streamKey = json.optString("streamKey", "")
+                val videoBitrateKbps = json.optInt("videoBitrateKbps", 2500)
                 if (streamUrl.isNotEmpty() && streamKey.isNotEmpty()) {
-                    onConfigReceived(streamUrl, streamKey)
+                    onConfigReceived(streamUrl, streamKey, videoBitrateKbps)
                     socket.getOutputStream().write("OK\n".toByteArray())
                     socket.getOutputStream().flush()
                 } else {
