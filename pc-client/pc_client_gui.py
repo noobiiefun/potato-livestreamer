@@ -90,14 +90,18 @@ class PotatoLivestreamerGUI:
         self.fps_var = tk.StringVar(value=self.config_data.get("fps", "30"))
         ttk.Combobox(col2, textvariable=self.fps_var, values=core.FPS_OPTIONS, state="readonly").pack(fill="x")
 
-        self._label(form, "Kualitas Capture PC → HP (lewat USB)")
+        encoder = core.detect_hw_encoder()
+        self._label(form, f"Encoder PC: {core.encoder_display_name(encoder)}")
         self.mjpeg_quality_var = tk.StringVar(value=self.config_data.get("mjpeg_quality_preset", "Seimbang (disarankan)"))
         ttk.Combobox(form, textvariable=self.mjpeg_quality_var,
-                     values=list(core.MJPEG_QUALITY_PRESETS.keys()), state="readonly").pack(fill="x", pady=(0, 4))
-        tk.Label(form, text="Ini beban ke kabel USB, bukan ke YouTube. Turunkan kalau lag.",
-                 bg=APP_BG, fg=BROWN, font=("Segoe UI", 8, "italic")).pack(anchor="w", pady=(0, 10))
+                     values=list(core.ENCODER_SPEED_PRESETS.keys()), state="readonly").pack(fill="x", pady=(0, 4))
+        if encoder == "libx264":
+            note = "Tidak ada GPU hardware encoder terdeteksi — pakai software (lebih berat CPU). Turunkan preset kalau lag."
+        else:
+            note = "GPU hardware encoder terdeteksi — preset ini nyaris tidak berpengaruh ke CPU."
+        tk.Label(form, text=note, bg=APP_BG, fg=BROWN, font=("Segoe UI", 8, "italic")).pack(anchor="w", pady=(0, 10))
 
-        self._label(form, "Kualitas / Bitrate Video ke YouTube (di-encode HP)")
+        self._label(form, "Kualitas / Bitrate Video ke YouTube (di-encode PC, H.264)")
         self.bitrate_var = tk.StringVar(value=self.config_data.get("bitrate_preset", "Sedang (disarankan)"))
         ttk.Combobox(form, textvariable=self.bitrate_var,
                      values=list(core.BITRATE_PRESETS.keys()), state="readonly").pack(fill="x", pady=(0, 12))
@@ -142,7 +146,7 @@ class PotatoLivestreamerGUI:
         # --- Audio -----------------------------------------------------------------
         audio_note = tk.Label(
             form,
-            text="🔇 Audio belum didukung di arsitektur ini (PC kirim MJPEG video-only).\n"
+            text="🔇 Audio belum didukung di arsitektur ini (PC kirim H.264 video-only).\n"
                  "Rencana lanjutan: jalur audio terpisah — lihat README.",
             bg=APP_BG, fg=BROWN, font=("Segoe UI", 9, "italic"), justify="left", anchor="w",
         )
@@ -238,8 +242,8 @@ class PotatoLivestreamerGUI:
         res_key = resolution_label.split(" ")[0]  # "720p (1280x720)" -> "720p"
         bitrate_kbps = core.BITRATE_PRESETS.get(bitrate_label, {}).get(res_key, 2500)
 
-        mjpeg_label = self.mjpeg_quality_var.get()
-        mjpeg_quality = core.MJPEG_QUALITY_PRESETS.get(mjpeg_label, 6)
+        speed_label = self.mjpeg_quality_var.get()
+        encoder_speed_preset = core.ENCODER_SPEED_PRESETS.get(speed_label, "ultrafast")
 
         capture_mode = self.capture_mode_var.get()
 
@@ -250,8 +254,8 @@ class PotatoLivestreamerGUI:
             "fps": self.fps_var.get(),
             "bitrate_preset": bitrate_label,
             "bitrate_kbps": bitrate_kbps,
-            "mjpeg_quality_preset": mjpeg_label,
-            "mjpeg_quality": mjpeg_quality,
+            "mjpeg_quality_preset": speed_label,
+            "encoder_speed_preset": encoder_speed_preset,
             "width": width,
             "height": height,
             "capture_mode": capture_mode,

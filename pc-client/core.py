@@ -1,17 +1,18 @@
 """
 Potato Livestreamer — logika inti sisi PC.
 
-ARSITEKTUR (v3): PC ringan, HP yang kerja berat.
-  - PC cuma capture layar dan compress ke MJPEG (cepat, murah CPU — tidak
-    mengganggu game yang sedang jalan). TIDAK ada H.264 encode di PC.
-  - HP menerima MJPEG itu, decode framenya, lalu ENCODE ke H.264 memakai
-    hardware encoder Android (h264_mediacodec) — persis seperti proses
-    "merekam layar", tapi hasilnya langsung dialirkan ke RTMP/YouTube
-    alih-alih disimpan ke file.
-
-Konsekuensi: MJPEG jauh lebih besar dari H.264 per frame, jadi ini lebih
-boros bandwidth USB dibanding versi sebelumnya (PC encode + HP remux) — tapi
-PC-nya sendiri hampir tidak terbebani sama sekali.
+ARSITEKTUR (v4): PC encode H.264 (hardware), HP cuma remux — tanpa flicker.
+  - PC capture layar lalu langsung ENCODE ke H.264 memakai hardware encoder
+    GPU (NVENC/QuickSync/AMF, fallback libx264 software) dengan tuning
+    low-latency. H.264 punya kompensasi gerak antar-frame, jadi hasilnya
+    stabil di 30-60fps tanpa "flicker" yang muncul kalau kirim JPEG lepas
+    per-frame (MJPEG) — tiap frame JPEG dikuantisasi independen, jadi area
+    datar/gradasi bisa terlihat "bernapas"/berkedip antar frame, apalagi
+    setelah di-decode+encode ulang di HP (double lossy compression).
+  - PC mengirim H.264 itu dibungkus MPEG-TS lewat TCP (adb forward) ke HP.
+  - HP TIDAK decode/encode apa-apa lagi — cuma REMUX (`-c copy`) stream itu
+    langsung ke RTMP/YouTube. Jauh lebih ringan buat HP (tidak panas, tidak
+    boros baterai) dibanding versi decode+encode sebelumnya.
 
 Dipakai oleh pc_client_gui.py (rekomendasi, ada UI) dan pc_client.py (CLI,
 untuk yang lebih suka terminal / scripting). Tidak ada logika UI di sini
@@ -39,18 +40,22 @@ RESOLUTION_PRESETS = {
     "1080p (1920x1080)": (1920, 1080),
 }
 
-# Kualitas MJPEG yang dikirim PC -> HP lewat USB. Skala ffmpeg -q:v: 2 = terbaik
-# (file besar), 31 = terburuk (file kecil). Ini yang paling menentukan beban
-# USB — makin tinggi kualitas, makin besar data yang harus muat di adb forward.
-MJPEG_QUALITY_PRESETS = {
-    "Hemat USB (kualitas rendah)": 12,
-    "Seimbang (disarankan)": 6,
-    "Kualitas tinggi (USB harus kencang)": 3,
+# Preset kecepatan encoder software (libx264), dipakai HANYA kalau tidak ada
+# hardware encoder (NVENC/QuickSync/AMF) terdeteksi di PC. Preset lebih cepat
+# = CPU lebih ringan tapi kompresi kurang efisien di bitrate yang sama.
+# (Kalau hardware encoder terdeteksi, preset ini tidak dipakai — GPU jauh
+# lebih murah CPU-nya daripada libx264 preset apapun.)
+ENCODER_SPEED_PRESETS = {
+    "Hemat CPU (disarankan utk PC pas-pasan)": "ultrafast",
+    "Seimbang": "veryfast",
+    "Kualitas lebih baik (CPU lebih berat)": "faster",
 }
+# Alias lama dipertahankan supaya config.json existing & GUI lama tidak error.
+MJPEG_QUALITY_PRESETS = ENCODER_SPEED_PRESETS
 
-# Target bitrate H.264 FINAL yang di-encode HP sebelum dikirim ke YouTube
-# (kbps). Ini dikirim ke HP lewat control channel, dipakai di command ffmpeg
-# HP (-b:v), TIDAK dipakai di sisi PC lagi.
+# Target bitrate H.264 yang di-ENCODE LANGSUNG DI PC (kbps) sebelum dikirim
+# ke HP. HP tidak lagi encode apapun, jadi angka ini sekarang benar-benar
+# menentukan kualitas video yang sampai ke penonton YouTube.
 BITRATE_PRESETS = {
     "Rendah (hemat data)": {"480p": 800, "720p": 1500, "1080p": 2500},
     "Sedang (disarankan)": {"480p": 1200, "720p": 2500, "1080p": 4500},
@@ -224,8 +229,54 @@ def send_control_config(control_port: int, stream_url: str, stream_key: str,
 
 
 # ---------------------------------------------------------------------------
-# FFmpeg command building — sisi PC HANYA capture + compress MJPEG (murah),
-# TIDAK encode H.264. HP yang melakukan decode + H.264 encode (hardware).
+# Deteksi hardware encoder H.264 yang tersedia di PC. Dicoba urut dari yang
+# paling murah CPU-nya: NVENC (Nvidia) -> QuickSync (Intel iGPU) -> AMF (AMD)
+# -> fallback libx264 software kalau tidak ada satupun yang tersedia.
+# Hasil dicache per-proses supaya tidak nge-spawn ffmpeg -encoders berulang.
+# ---------------------------------------------------------------------------
+
+_HW_ENCODER_CACHE: str | None = None
+
+HW_ENCODER_CANDIDATES = ["h264_nvenc", "h264_qsv", "h264_amf"]
+
+
+def detect_hw_encoder(force_refresh: bool = False) -> str:
+    """Mengembalikan nama encoder H.264 terbaik yang tersedia di ffmpeg PC
+    ini: salah satu dari HW_ENCODER_CANDIDATES, atau 'libx264' kalau tidak
+    ada hardware encoder yang terdeteksi (fallback software)."""
+    global _HW_ENCODER_CACHE
+    if _HW_ENCODER_CACHE is not None and not force_refresh:
+        return _HW_ENCODER_CACHE
+
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=10,
+        )
+        available = result.stdout
+        for candidate in HW_ENCODER_CANDIDATES:
+            if candidate in available:
+                _HW_ENCODER_CACHE = candidate
+                return candidate
+    except Exception:
+        pass
+
+    _HW_ENCODER_CACHE = "libx264"
+    return "libx264"
+
+
+def encoder_display_name(encoder: str) -> str:
+    return {
+        "h264_nvenc": "NVIDIA NVENC (hardware)",
+        "h264_qsv": "Intel QuickSync (hardware)",
+        "h264_amf": "AMD AMF (hardware)",
+        "libx264": "libx264 (software, fallback)",
+    }.get(encoder, encoder)
+
+
+# ---------------------------------------------------------------------------
+# FFmpeg command building — PC capture + ENCODE H.264 langsung (hardware bila
+# tersedia), dibungkus MPEG-TS, dikirim mentah ke HP untuk cuma di-remux.
 # ---------------------------------------------------------------------------
 
 def build_video_input_args(config: dict) -> list[str]:
@@ -250,7 +301,8 @@ def build_video_input_args(config: dict) -> list[str]:
 
 def build_capture_command(config: dict, video_port: int) -> list[str]:
     system = platform.system()
-    cmd = ["ffmpeg", "-y", "-framerate", str(config.get("fps", "30"))]
+    fps = int(config.get("fps", "30"))
+    cmd = ["ffmpeg", "-y", "-framerate", str(fps)]
 
     width, height = config.get("width", 1280), config.get("height", 720)
 
@@ -261,16 +313,46 @@ def build_capture_command(config: dict, video_port: int) -> list[str]:
 
     cmd += build_video_input_args(config)
 
-    # NOTE (audio): belum didukung di versi arsitektur ini. MJPEG adalah
-    # video-only elementary stream, tidak bisa membawa audio dalam 1 koneksi
-    # sederhana seperti mpegts dulu. Rencana lanjutan: buka port TCP kedua
-    # khusus audio (AAC) dan HP mux dua sumber itu bareng saat encode.
+    # NOTE (audio): belum didukung di versi arsitektur ini (video-only).
+    # Rencana lanjutan: tambah -f dshow/pulse input audio kedua dan mux
+    # bareng jadi satu mpegts (-map 0:v -map 1:a) sebelum dikirim ke HP.
     # audio_device = (config.get("audio_device") or "").strip()
 
-    mjpeg_q = config.get("mjpeg_quality", 6)  # 2=terbaik/besar, 31=terburuk/kecil
-    cmd += ["-c:v", "mjpeg", "-q:v", str(mjpeg_q)]
+    bitrate_kbps = config.get("bitrate_kbps", 2500)
+    gop = fps * 2  # keyframe tiap 2 detik: cukup rapat utk recovery paket hilang,
+                   # tapi tidak terlalu sering supaya bitrate tetap efisien.
+    encoder = detect_hw_encoder()
 
-    # MJPEG elementary stream: barisan gambar JPEG yang disambung langsung,
-    # dikirim mentah lewat TCP ke HP. HP yang decode & encode ulang.
-    cmd += ["-f", "mjpeg", f"tcp://127.0.0.1:{video_port}"]
+    cmd += ["-c:v", encoder]
+    if encoder == "h264_nvenc":
+        cmd += [
+            "-preset", "p1", "-tune", "ull",  # p1+ull = ultra-low-latency Nvidia
+            "-rc", "cbr", "-b:v", f"{bitrate_kbps}k",
+            "-g", str(gop), "-bf", "0", "-zerolatency", "1",
+        ]
+    elif encoder == "h264_qsv":
+        cmd += [
+            "-preset", "veryfast",
+            "-b:v", f"{bitrate_kbps}k", "-g", str(gop), "-bf", "0",
+        ]
+    elif encoder == "h264_amf":
+        cmd += [
+            "-usage", "ultralowlatency", "-quality", "speed",
+            "-b:v", f"{bitrate_kbps}k", "-g", str(gop), "-bf", "0",
+        ]
+    else:  # libx264 software fallback
+        speed_preset = config.get("encoder_speed_preset", "ultrafast")
+        cmd += [
+            "-preset", speed_preset, "-tune", "zerolatency",
+            "-b:v", f"{bitrate_kbps}k", "-maxrate", f"{bitrate_kbps}k",
+            "-bufsize", f"{bitrate_kbps * 2}k",
+            "-g", str(gop), "-bf", "0", "-pix_fmt", "yuv420p",
+        ]
+
+    # H.264 elementary stream dibungkus MPEG-TS (standar buat streaming lewat
+    # jaringan/pipe) lalu dikirim mentah lewat TCP. HP tinggal remux (-c copy)
+    # stream ini langsung ke RTMP, tanpa decode/encode ulang sama sekali —
+    # itu sebabnya tidak ada flicker (tidak ada kompresi lossy dobel) dan
+    # HP hampir tidak terbebani.
+    cmd += ["-f", "mpegts", f"tcp://127.0.0.1:{video_port}"]
     return cmd

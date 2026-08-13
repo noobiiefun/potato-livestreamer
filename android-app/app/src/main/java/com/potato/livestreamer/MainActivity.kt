@@ -19,28 +19,27 @@ import com.arthenica.ffmpegkit.Statistics
 /**
  * Potato Livestreamer — Android side.
  *
- * ARSITEKTUR (v3): PC ringan, HP yang kerja berat.
- *   - PC hanya capture layar dan compress ke MJPEG (murah CPU, tidak
- *     mengganggu game yang sedang berjalan di PC). PC TIDAK melakukan
- *     H.264 encode sama sekali.
- *   - HP (di sinilah kita) menerima MJPEG itu lewat video port, lalu
- *     mendecode setiap frame-nya dan meng-ENCODE ke H.264 memakai hardware
- *     encoder Android (`h264_mediacodec`) — mirip proses "merekam layar",
- *     tapi hasilnya langsung dialirkan ke RTMP/YouTube, bukan disimpan ke
- *     file. Ini pekerjaan yang nyata — makanya HP jadi panas/baterai
- *     terpakai, beda dari versi lama yang cuma remux (lewatin) doang.
+ * ARSITEKTUR (v4): PC yang encode H.264 (hardware), HP cuma remux.
+ *   - PC capture layar dan langsung ENCODE ke H.264 (NVENC/QuickSync/AMF,
+ *     fallback libx264), dibungkus MPEG-TS, dikirim lewat video port.
+ *   - HP (di sinilah kita) TIDAK decode/encode apa-apa lagi — cuma REMUX
+ *     (`-c copy`) stream MPEG-TS itu langsung ke RTMP/YouTube. Karena tidak
+ *     ada decode+encode ulang, HP jauh lebih dingin/hemat baterai, DAN tidak
+ *     ada kompresi lossy dobel yang bikin gambar "flicker" seperti versi
+ *     MJPEG sebelumnya — video yang sampai ke YouTube persis sama kualitas
+ *     H.264 yang di-encode PC.
  *
  * Flow:
  *   1. User tekan "Tunggu Koneksi PC" -> buka ControlServer, menunggu PC
- *      mengirim Stream URL + Stream Key + target bitrate H.264.
+ *      mengirim Stream URL + Stream Key.
  *   2. Begitu config diterima, "Go LIVE" aktif.
  *   3. User tekan "Go LIVE" -> FFmpeg mulai listen di video port, menunggu
- *      MJPEG stream dari PC, decode + encode H.264 (hardware) + push RTMP.
+ *      stream MPEG-TS/H.264 dari PC, lalu REMUX (copy, tanpa re-encode) ke RTMP.
  *   4. Resilience: kalau sesi terputus tak terduga (USB goyang, dsb) dan
  *      user belum menekan Stop, sesi otomatis di-restart, bukan langsung
  *      idle — supaya gangguan sesaat tidak memutus LIVE sepenuhnya.
  *
- * CATATAN: audio belum didukung di versi ini — PC mengirim video-only MJPEG.
+ * CATATAN: audio belum didukung di versi ini — PC mengirim video-only H.264.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -137,9 +136,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Starts (or restarts) the FFmpeg session: listen for MJPEG from PC,
-     * decode it, encode to H.264 with the phone's hardware encoder
-     * (h264_mediacodec), and push to RTMP.
+     * Starts (or restarts) the FFmpeg session: listen for the MPEG-TS/H.264
+     * stream PC already encoded, and just REMUX it (no decode, no re-encode)
+     * straight into the RTMP push.
      *
      * On unexpected termination (and only if the user hasn't pressed Stop),
      * this re-calls itself after a short delay instead of going idle — brief
@@ -148,19 +147,18 @@ class MainActivity : AppCompatActivity() {
     private fun startFfmpegListenLoop(videoPort: String, fullRtmpUrl: String, isRetry: Boolean) {
         if (userStopped) return
 
-        // Input: MJPEG elementary stream (sequence of JPEG frames) from PC.
-        // -c:v h264_mediacodec: HARDWARE H.264 encoder built into the phone's
-        //   chipset — this is the actual "recording" work this phone does.
-        //   (Software x264 isn't available in the LGPL-only ffmpeg-kit build
-        //   this app uses, and would be far too slow on a budget phone anyway.)
-        // -b:v: target bitrate the PC told us to aim for (YouTube quality).
-        val command = "-f mjpeg -i tcp://0.0.0.0:$videoPort?listen=1 " +
-            "-c:v h264_mediacodec -b:v ${receivedBitrateKbps}k -f flv $fullRtmpUrl"
+        // Input: MPEG-TS containing H.264 already encoded by the PC.
+        // -c copy: REMUX only — just repackages the existing H.264 bitstream
+        //   into FLV/RTMP without touching the pixels. No decode, no
+        //   re-encode, so the phone barely works (no heat, no battery hit),
+        //   and there's no second lossy compression pass (no flicker).
+        val command = "-fflags +genpts -i tcp://0.0.0.0:$videoPort?listen=1 " +
+            "-c copy -f flv $fullRtmpUrl"
 
-        log(if (isRetry) "🔁 Mencoba menyambung ulang ke PC..." else "▶️ Menunggu koneksi MJPEG dari PC di port $videoPort ...")
+        log(if (isRetry) "🔁 Mencoba menyambung ulang ke PC..." else "▶️ Menunggu stream H.264 dari PC di port $videoPort ...")
         if (!isRetry) {
             log("   Di PC, jalankan/lanjutkan pc_client_gui.py sekarang.")
-            log("   HP akan decode + encode H.264 (hardware) sendiri — ini yang bikin HP kerja/panas.")
+            log("   HP cuma remux (copy) stream ini ke RTMP — ringan, tidak decode/encode apapun.")
         }
 
         activeSession = FFmpegKit.executeAsync(
@@ -178,8 +176,7 @@ class MainActivity : AppCompatActivity() {
                     if (ReturnCode.isSuccess(returnCode)) {
                         log("ℹ️ Sesi video berakhir, menunggu koneksi baru dari PC...")
                     } else {
-                        log("⚠️ Koneksi terputus atau encoder gagal (kemungkinan USB tidak stabil,")
-                        log("   atau chip HP tidak mendukung h264_mediacodec — cek log lengkap kalau berulang).")
+                        log("⚠️ Koneksi terputus (kemungkinan USB tidak stabil atau PC berhenti mengirim).")
                         log("   LIVE TIDAK dimatikan — mencoba menyambung ulang otomatis dalam 2 detik...")
                     }
 
