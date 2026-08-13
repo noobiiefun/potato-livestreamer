@@ -144,13 +144,21 @@ class PotatoLivestreamerGUI:
         self._on_capture_mode_change()  # tampilkan frame yang sesuai di awal
 
         # --- Audio -----------------------------------------------------------------
-        audio_note = tk.Label(
+        self._label(form, "Perangkat Audio (mic atau loopback speaker)")
+        audio_row = tk.Frame(form, bg=APP_BG)
+        audio_row.pack(fill="x")
+        self.audio_device_var = tk.StringVar(value=self.config_data.get("audio_device", core.NO_AUDIO_LABEL))
+        self.audio_combo = ttk.Combobox(audio_row, textvariable=self.audio_device_var, state="readonly", width=38)
+        self.audio_combo["values"] = [core.NO_AUDIO_LABEL]
+        self.audio_combo.pack(side="left", fill="x", expand=True)
+        tk.Button(audio_row, text="🔄 Refresh", command=self._refresh_audio_devices).pack(side="left", padx=4)
+        tk.Label(
             form,
-            text="🔇 Audio belum didukung di arsitektur ini (PC kirim H.264 video-only).\n"
-                 "Rencana lanjutan: jalur audio terpisah — lihat README.",
-            bg=APP_BG, fg=BROWN, font=("Segoe UI", 9, "italic"), justify="left", anchor="w",
-        )
-        audio_note.pack(fill="x", pady=(0, 12))
+            text="Klik Refresh dulu buat lihat daftar device. Windows: butuh loopback "
+                 "(\"Stereo Mix\" atau virtual audio cable spt VB-CABLE) kalau mau suara desktop, "
+                 "bukan cuma mic. \"Tanpa Audio\" = video-only seperti sebelumnya.",
+            bg=APP_BG, fg=BROWN, font=("Segoe UI", 8, "italic"), justify="left", anchor="w", wraplength=420,
+        ).pack(fill="x", pady=(0, 12))
 
         # --- Ports (advanced) -------------------------------------------------------
         ports_row = tk.Frame(form, bg=APP_BG)
@@ -214,6 +222,30 @@ class PotatoLivestreamerGUI:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    # ------------------------------------------------------------------
+    # Refresh button (audio devices)
+    # ------------------------------------------------------------------
+
+    def _refresh_audio_devices(self):
+        self._log("🔍 Mencari perangkat audio...")
+
+        def worker():
+            devices = core.list_audio_devices()
+            self.root.after(0, lambda: self._apply_audio_list(devices))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_audio_list(self, devices: list[str]):
+        values = [core.NO_AUDIO_LABEL] + devices
+        self.audio_combo["values"] = values
+        if devices:
+            self._log(f"✅ Ditemukan {len(devices)} perangkat audio.")
+        else:
+            self._log("⚠️ Tidak ada perangkat audio terdeteksi (atau OS ini butuh setup tambahan — lihat README bagian Audio).")
+        # Kalau device yang sebelumnya dipilih sudah tidak ada di list baru, reset ke "Tanpa Audio"
+        if self.audio_device_var.get() not in values:
+            self.audio_device_var.set(core.NO_AUDIO_LABEL)
+
     def _apply_window_list(self, titles: list[str]):
         self.window_combo["values"] = titles
         if titles:
@@ -256,6 +288,7 @@ class PotatoLivestreamerGUI:
             "bitrate_kbps": bitrate_kbps,
             "mjpeg_quality_preset": speed_label,
             "encoder_speed_preset": encoder_speed_preset,
+            "audio_device": self.audio_device_var.get(),
             "width": width,
             "height": height,
             "capture_mode": capture_mode,

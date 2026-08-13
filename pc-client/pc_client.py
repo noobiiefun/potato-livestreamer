@@ -99,7 +99,7 @@ def prompt_capture_config(existing: dict) -> dict:
     config["mjpeg_quality_preset"] = speed_label
     config["encoder_speed_preset"] = core.ENCODER_SPEED_PRESETS[speed_label]
 
-    print("\nKualitas / Bitrate Video ke YouTube (di-encode HP):")
+    print("\nKualitas / Bitrate Video ke YouTube (di-encode PC, H.264):")
     b_keys = list(core.BITRATE_PRESETS.keys())
     for i, k in enumerate(b_keys, 1):
         print(f"  {i}. {k}")
@@ -111,6 +111,20 @@ def prompt_capture_config(existing: dict) -> dict:
     res_key = resolution_label.split(" ")[0]
     config["bitrate_preset"] = bitrate_label
     config["bitrate_kbps"] = core.BITRATE_PRESETS[bitrate_label].get(res_key, 2500)
+
+    print("\nMencari perangkat audio...")
+    audio_devices = core.list_audio_devices()
+    a_keys = [core.NO_AUDIO_LABEL] + audio_devices
+    for i, k in enumerate(a_keys, 1):
+        print(f"  {i}. {k}")
+    if not audio_devices:
+        print("  (tidak ada perangkat audio terdeteksi — cek README bagian Audio kalau butuh loopback)")
+    a_choice = input("Pilih perangkat audio [1]: ").strip() or "1"
+    try:
+        audio_label = a_keys[int(a_choice) - 1]
+    except (ValueError, IndexError):
+        audio_label = core.NO_AUDIO_LABEL
+    config["audio_device"] = audio_label
 
     return config
 

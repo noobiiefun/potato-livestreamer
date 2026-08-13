@@ -231,8 +231,14 @@ def send_control_config(control_port: int, stream_url: str, stream_key: str,
 # ---------------------------------------------------------------------------
 # Deteksi hardware encoder H.264 yang tersedia di PC. Dicoba urut dari yang
 # paling murah CPU-nya: NVENC (Nvidia) -> QuickSync (Intel iGPU) -> AMF (AMD)
-# -> fallback libx264 software kalau tidak ada satupun yang tersedia.
-# Hasil dicache per-proses supaya tidak nge-spawn ffmpeg -encoders berulang.
+# -> fallback libx264 software kalau tidak ada satupun yang beneran jalan.
+#
+# PENTING: `ffmpeg -encoders` cuma nunjukin encoder yang KE-COMPILE di build
+# ffmpeg-nya — build lengkap biasanya mencantumkan nvenc/qsv/amf semua,
+# terlepas dari GPU apa yang benar-benar terpasang. Jadi cuma cek nama di
+# daftar itu TIDAK CUKUP: kita coba encode 1 frame sungguhan ke tiap kandidat
+# lewat `-f null -`, dan yang dipakai cuma yang benar-benar berhasil (exit
+# code 0). Ini sedikit lebih lambat sekali di awal, tapi hasilnya dicache.
 # ---------------------------------------------------------------------------
 
 _HW_ENCODER_CACHE: str | None = None
@@ -240,26 +246,40 @@ _HW_ENCODER_CACHE: str | None = None
 HW_ENCODER_CANDIDATES = ["h264_nvenc", "h264_qsv", "h264_amf"]
 
 
+def _encoder_actually_works(encoder: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "nullsrc=s=1280x720", "-frames:v", "1",
+             "-c:v", encoder, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def detect_hw_encoder(force_refresh: bool = False) -> str:
-    """Mengembalikan nama encoder H.264 terbaik yang tersedia di ffmpeg PC
-    ini: salah satu dari HW_ENCODER_CANDIDATES, atau 'libx264' kalau tidak
-    ada hardware encoder yang terdeteksi (fallback software)."""
+    """Mengembalikan nama encoder H.264 terbaik yang BENAR-BENAR BISA jalan
+    di PC ini: salah satu dari HW_ENCODER_CANDIDATES, atau 'libx264' kalau
+    tidak ada hardware encoder yang berhasil di-probe (fallback software)."""
     global _HW_ENCODER_CACHE
     if _HW_ENCODER_CACHE is not None and not force_refresh:
         return _HW_ENCODER_CACHE
 
     try:
-        result = subprocess.run(
+        listed = subprocess.run(
             ["ffmpeg", "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=10,
-        )
-        available = result.stdout
-        for candidate in HW_ENCODER_CANDIDATES:
-            if candidate in available:
-                _HW_ENCODER_CACHE = candidate
-                return candidate
+        ).stdout
     except Exception:
-        pass
+        listed = ""
+
+    for candidate in HW_ENCODER_CANDIDATES:
+        # Cek dulu apakah ke-compile (murah) sebelum probe encode (lebih mahal).
+        if candidate in listed and _encoder_actually_works(candidate):
+            _HW_ENCODER_CACHE = candidate
+            return candidate
 
     _HW_ENCODER_CACHE = "libx264"
     return "libx264"
@@ -278,6 +298,9 @@ def encoder_display_name(encoder: str) -> str:
 # FFmpeg command building — PC capture + ENCODE H.264 langsung (hardware bila
 # tersedia), dibungkus MPEG-TS, dikirim mentah ke HP untuk cuma di-remux.
 # ---------------------------------------------------------------------------
+
+NO_AUDIO_LABEL = "Tanpa Audio"
+
 
 def build_video_input_args(config: dict) -> list[str]:
     system = platform.system()
@@ -299,29 +322,58 @@ def build_video_input_args(config: dict) -> list[str]:
         raise RuntimeError(f"OS '{system}' belum didukung.")
 
 
+def build_audio_input_args(config: dict) -> list[str] | None:
+    """None kalau user pilih 'Tanpa Audio' / tidak set device. Kalau ada,
+    mengembalikan args INPUT audio terpisah (device sendiri, bukan bagian
+    dari video input) — supaya PC bebas ambil dari device audio apapun
+    (loopback speaker atau mic) sesuai pilihan di list_audio_devices()."""
+    audio_device = (config.get("audio_device") or "").strip()
+    if not audio_device or audio_device == NO_AUDIO_LABEL:
+        return None
+
+    system = platform.system()
+    if system == "Windows":
+        # dshow butuh nama device dibungkus format "audio=<nama>"
+        return ["-f", "dshow", "-i", f"audio={audio_device}"]
+    elif system == "Darwin":
+        # list_audio_devices() Darwin mengembalikan "<index> - <nama>"
+        idx = audio_device.split(" - ")[0].strip()
+        return ["-f", "avfoundation", "-i", f":{idx}"]
+    elif system == "Linux":
+        # list_audio_devices() Linux mengembalikan nama source PulseAudio langsung
+        return ["-f", "pulse", "-i", audio_device]
+    return None
+
+
 def build_capture_command(config: dict, video_port: int) -> list[str]:
     system = platform.system()
     fps = int(config.get("fps", "30"))
-    cmd = ["ffmpeg", "-y", "-framerate", str(fps)]
+    cmd = ["ffmpeg", "-y"]
 
+    # --- Input 0: video (layar) --------------------------------------------
+    cmd += ["-framerate", str(fps)]
     width, height = config.get("width", 1280), config.get("height", 720)
-
     if config.get("capture_mode") != "window":
         cmd += ["-video_size", f"{width}x{height}"]
         if system == "Windows" and config.get("offset_x") is not None and config.get("offset_y") is not None:
             cmd += ["-offset_x", str(config["offset_x"]), "-offset_y", str(config["offset_y"])]
+    cmd += build_video_input_args(config)  # -> input index 0
 
-    cmd += build_video_input_args(config)
-
-    # NOTE (audio): belum didukung di versi arsitektur ini (video-only).
-    # Rencana lanjutan: tambah -f dshow/pulse input audio kedua dan mux
-    # bareng jadi satu mpegts (-map 0:v -map 1:a) sebelum dikirim ke HP.
-    # audio_device = (config.get("audio_device") or "").strip()
+    # --- Input 1: audio (opsional) ------------------------------------------
+    audio_args = build_audio_input_args(config)
+    has_audio = audio_args is not None
+    if has_audio:
+        cmd += audio_args  # -> input index 1
 
     bitrate_kbps = config.get("bitrate_kbps", 2500)
     gop = fps * 2  # keyframe tiap 2 detik: cukup rapat utk recovery paket hilang,
                    # tapi tidak terlalu sering supaya bitrate tetap efisien.
     encoder = detect_hw_encoder()
+
+    # --- Mapping: video dari input 0, audio (kalau ada) dari input 1 --------
+    cmd += ["-map", "0:v:0"]
+    if has_audio:
+        cmd += ["-map", "1:a:0"]
 
     cmd += ["-c:v", encoder]
     if encoder == "h264_nvenc":
@@ -349,10 +401,13 @@ def build_capture_command(config: dict, video_port: int) -> list[str]:
             "-g", str(gop), "-bf", "0", "-pix_fmt", "yuv420p",
         ]
 
-    # H.264 elementary stream dibungkus MPEG-TS (standar buat streaming lewat
-    # jaringan/pipe) lalu dikirim mentah lewat TCP. HP tinggal remux (-c copy)
-    # stream ini langsung ke RTMP, tanpa decode/encode ulang sama sekali —
-    # itu sebabnya tidak ada flicker (tidak ada kompresi lossy dobel) dan
-    # HP hampir tidak terbebani.
+    if has_audio:
+        # AAC 128kbps standar buat RTMP/YouTube, ringan buat CPU/USB dibanding video.
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2"]
+
+    # Video (+ audio kalau ada) dibungkus satu MPEG-TS lalu dikirim mentah
+    # lewat TCP. HP tinggal remux (-c copy) — ini otomatis menyalin SEMUA
+    # stream yang ada (video dan audio), jadi MainActivity.kt tidak perlu
+    # diubah sama sekali untuk mendukung audio.
     cmd += ["-f", "mpegts", f"tcp://127.0.0.1:{video_port}"]
     return cmd
