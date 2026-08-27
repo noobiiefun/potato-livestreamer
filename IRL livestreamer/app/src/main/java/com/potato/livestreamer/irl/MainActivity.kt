@@ -16,6 +16,13 @@ import com.google.android.gms.location.*
 import com.pedro.common.ConnectChecker
 import com.pedro.rtplibrary.view.OpenGlView
 import com.pedro.rtplibrary.rtmp.RtmpCamera2
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import java.io.File
 
 class MainActivity : AppCompatActivity(), ConnectChecker {
 
@@ -29,6 +36,21 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private lateinit var etRtmpUrl: EditText
     private lateinit var btnStartStream: Button
     private lateinit var btnSwitchCamera: Button
+    private lateinit var btnToggleMap: Button
+
+    // --- Live-Tracking (peta) ---
+    private lateinit var mapView: MapView
+    private var routeLine: Polyline? = null
+    private var positionMarker: Marker? = null
+    private var mapVisible = true
+    private var lastMapUpdateMillis = 0L
+    private var lastMapPoint: GeoPoint? = null
+    // Throttle: peta di-refresh minimal tiap sekian ms & sekian meter,
+    // supaya tidak membebani CPU/RAM HP Android Go (beda dengan tvSpeed yang
+    // aman di-update tiap lokasi masuk karena cuma ganti teks).
+    private val MAP_UPDATE_MIN_INTERVAL_MS = 2000L
+    private val MAP_UPDATE_MIN_DISTANCE_M = 8f
+    private val MAP_DEFAULT_ZOOM = 17.0
 
     private val REQUIRED_PERMISSIONS = arrayOf(
         Manifest.permission.CAMERA,
@@ -45,6 +67,19 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private val VIDEO_BITRATE = 1200 * 1024
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // WAJIB dipanggil SEBELUM inflate layout yang mengandung MapView —
+        // ini set User-Agent (syarat tile server OSM, kalau tidak diisi
+        // beberapa request bisa ditolak/rate-limit) dan pindahkan folder
+        // cache osmdroid ke cache dir milik app sendiri (getCacheDir()),
+        // supaya TIDAK perlu izin WRITE_EXTERNAL_STORAGE sama sekali.
+        Configuration.getInstance().load(
+            applicationContext,
+            getSharedPreferences("osmdroid_prefs", MODE_PRIVATE)
+        )
+        Configuration.getInstance().userAgentValue = packageName
+        Configuration.getInstance().osmdroidBasePath = File(cacheDir, "osmdroid")
+        Configuration.getInstance().osmdroidTileCache = File(cacheDir, "osmdroid/tiles")
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -53,7 +88,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         etRtmpUrl = findViewById(R.id.etRtmpUrl)
         btnStartStream = findViewById(R.id.btnStartStream)
         btnSwitchCamera = findViewById(R.id.btnSwitchCamera)
+        btnToggleMap = findViewById(R.id.btnToggleMap)
         openGlView = findViewById(R.id.surfaceView)
+        mapView = findViewById(R.id.mapView)
+
+        setupMap()
 
         rtmpCamera = RtmpCamera2(openGlView, this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -64,12 +103,45 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             // RootEncoder menangani switch tanpa memutus koneksi RTMP yang berjalan.
             if (::rtmpCamera.isInitialized) rtmpCamera.switchCamera()
         }
+        btnToggleMap.setOnClickListener { toggleMapVisibility() }
 
         if (checkPermissions()) {
             startLocationTracking()
         } else {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, PERMISSION_REQUEST_CODE)
         }
+    }
+
+    private fun setupMap() {
+        mapView.setTileSource(TileSourceFactory.MAPNIK)
+        // Multi-touch tapi tanpa zoom-control bawaan (hemat ruang di mini-map).
+        mapView.setMultiTouchControls(true)
+        mapView.controller.setZoom(MAP_DEFAULT_ZOOM)
+
+        routeLine = Polyline().apply {
+            outlinePaint.strokeWidth = 6f
+            outlinePaint.color = 0xFF00FF00.toInt() // hijau, senada HUD kecepatan
+        }
+        mapView.overlays.add(routeLine)
+
+        positionMarker = Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            title = "Posisi sekarang"
+        }
+        mapView.overlays.add(positionMarker)
+    }
+
+    private fun toggleMapVisibility() {
+        mapVisible = !mapVisible
+        mapView.visibility = if (mapVisible) android.view.View.VISIBLE else android.view.View.GONE
+        btnToggleMap.text = if (mapVisible) {
+            getString(R.string.btn_toggle_map_hide)
+        } else {
+            getString(R.string.btn_toggle_map_show)
+        }
+        // Kalau disembunyikan, hentikan animasi tile osmdroid supaya benar-benar
+        // tidak makan CPU/baterai — bukan cuma disembunyikan secara visual.
+        if (!mapVisible) mapView.onPause() else mapView.onResume()
     }
 
     private fun checkPermissions(): Boolean {
@@ -100,6 +172,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         if (checkPermissions() && ::rtmpCamera.isInitialized && !rtmpCamera.isOnPreview) {
             rtmpCamera.startPreview()
         }
+        // osmdroid WAJIB dapat callback onResume/onPause sendiri (di luar
+        // lifecycle Activity) untuk mengelola thread download tile — kalau
+        // tidak dipanggil, tile bisa terus diunduh di background walau
+        // Activity sudah tidak terlihat (boros kuota & baterai).
+        if (::mapView.isInitialized && mapVisible) mapView.onResume()
     }
 
     override fun onPause() {
@@ -109,6 +186,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             // Kalau cuma preview biasa (belum live), aman untuk dilepas.
             rtmpCamera.stopPreview()
         }
+        if (::mapView.isInitialized) mapView.onPause()
     }
 
     private fun onStartStreamClicked() {
@@ -148,14 +226,48 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         val callback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 for (location in locationResult.locations) {
-                    // Kecepatan dari GPS dalam meter/detik, dikonversi ke km/jam
+                    // Kecepatan dari GPS dalam meter/detik, dikonversi ke km/jam.
+                    // Ini murah (cuma ganti teks), jadi aman di-update tiap lokasi masuk.
                     val speedKmH = (location.speed * 3.6).toInt()
                     tvSpeed.text = getString(R.string.hud_speed_format, speedKmH)
+
+                    updateMap(location)
                 }
             }
         }
         locationCallback = callback
         fusedLocationClient.requestLocationUpdates(locationRequest, callback, Looper.getMainLooper())
+    }
+
+    /**
+     * Gerakkan mini-peta: posisi marker + arah hadap (bearing GPS) + tambah
+     * titik ke garis rute. Di-throttle by waktu & jarak supaya render tile
+     * osmdroid tidak membebani CPU HP Android Go tiap 500ms seperti update
+     * teks kecepatan.
+     */
+    private fun updateMap(location: android.location.Location) {
+        if (!::mapView.isInitialized || !mapVisible) return
+
+        val point = GeoPoint(location.latitude, location.longitude)
+        val now = System.currentTimeMillis()
+        val movedEnough = lastMapPoint?.distanceToAsDouble(point)?.let { it >= MAP_UPDATE_MIN_DISTANCE_M } ?: true
+        val timeElapsed = now - lastMapUpdateMillis >= MAP_UPDATE_MIN_INTERVAL_MS
+        if (lastMapPoint != null && !(movedEnough && timeElapsed)) return
+
+        lastMapPoint = point
+        lastMapUpdateMillis = now
+
+        positionMarker?.position = point
+        // Bearing (arah hadap) cuma valid kalau device sedang benar-benar
+        // bergerak — kalau diam, GPS sering kirim bearing 0 yang menyesatkan
+        // (seolah selalu "menghadap utara"), jadi hanya dipakai kalau hasBearing().
+        if (location.hasBearing()) {
+            positionMarker?.rotation = location.bearing
+        }
+
+        routeLine?.addPoint(point)
+        mapView.controller.animateTo(point)
+        mapView.invalidate()
     }
 
     // --- Implementasi com.pedro.common.ConnectChecker ---
@@ -205,5 +317,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             if (rtmpCamera.isStreaming) rtmpCamera.stopStream()
             if (rtmpCamera.isOnPreview) rtmpCamera.stopPreview()
         }
+        // osmdroid menahan referensi bitmap tile & thread; wajib dilepas
+        // eksplisit atau bisa memory-leak Activity ini.
+        if (::mapView.isInitialized) mapView.onDetach()
     }
 }

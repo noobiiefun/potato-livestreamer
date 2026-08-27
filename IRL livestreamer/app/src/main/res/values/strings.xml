@@ -11,6 +11,8 @@
     <string name="btn_start_live">MULAI LIVE</string>
     <string name="btn_stop_live">STOP LIVE</string>
     <string name="btn_switch_camera">BALIK KAMERA</string>
+    <string name="btn_toggle_map_hide">SEMBUNYIKAN PETA</string>
+    <string name="btn_toggle_map_show">TAMPILKAN PETA</string>
 
     <string name="hint_rtmp_url">Masukkan URL RTMP + Stream Key</string>
     <!-- Sengaja dikosongkan (bukan URL contoh yang salah format seperti versi

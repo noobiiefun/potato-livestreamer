@@ -38,6 +38,78 @@ lingkungan yang mengerjakan ini). Yang WAJIB dilakukan berikutnya:
 | 11 | Struktur folder | Tidak ada `res/values/strings.xml` / `themes.xml` — semua teks hardcode di XML/Kotlin, `android:theme="@style/Theme.AppCompat.NoActionBar"` langsung dipakai tanpa style custom. | Dibuat `strings.xml` (semua teks dipindah ke sana) dan `themes.xml` (`Theme.PotatoLivestreamerIRL`). |
 | 12 | Package name | `MainActivity.kt` pakai package `com.potato.livestreamer` — **sama persis** dengan `android-app/` (mode PC-relay) yang sudah ada di root repo. Kalau dua modul ini pernah dibuka bareng/digabung, akan tabrakan. | Dipindah ke package `com.potato.livestreamer.irl` + `applicationId` disesuaikan. |
 
+## Fase 2 — Fitur Live-Tracking (peta + arah + rute)
+
+Konteks: user mau kembangkan **mode IRL livestreaming** ini dulu sebelum
+menyelesaikan mode relay-dari-PC (yang jalan terpisah di repo
+`potato-monitor-desk`, masih dalam pengembangan). 5 fitur yang diminta untuk
+mode IRL:
+1. **Live tracking** — kecepatan + peta visual + arah, dan idealnya rute
+   perjalanan real-time. **Tanpa Google Maps API** (user mau yang gratis).
+2. Kamera depan/belakang — ✅ sudah ada dari Fase 1.
+3. Android Go — ✅ sudah jadi basis desain dari awal.
+4. Live langsung RTMP — ✅ sudah ada dari Fase 1.
+5. Live chat masuk ke dalam video (burned-in, bukan cuma overlay UI lokal) —
+   **belum dikerjakan**, lihat roadmap di bawah.
+
+### Yang sudah dikerjakan di fase ini (poin #1)
+- Ditambahkan **osmdroid** (`org.osmdroid:osmdroid-android:6.1.20`) sebagai
+  library peta — ini pakai tile OpenStreetMap, **gratis, open source, TANPA
+  API key/akun/billing**, beda dari Google Maps SDK. Ini pilihan yang
+  cocok dengan permintaan "gratis" di atas.
+- Mini `MapView` (150x150dp) ditambahkan di pojok kanan atas layout, di
+  bawah panel HUD kecepatan. Sengaja dibuat kecil (bukan fullscreen) supaya
+  render tile tidak terlalu berat buat chip Android Go.
+- `Marker` yang berputar mengikuti `location.bearing` (arah hadap GPS) —
+  cuma dipakai kalau `location.hasBearing()` true, supaya tidak "muter-muter"
+  menyesatkan saat HP diam.
+- `Polyline` yang terus bertambah titik → jadi jejak rute perjalanan
+  real-time di peta (bukan cuma titik terakhir).
+- **Throttle update peta**: HUD kecepatan tetap update tiap lokasi masuk
+  (murah, cuma ganti teks), tapi peta cuma di-refresh kalau sudah geser
+  ≥8 meter DAN sudah lewat ≥2 detik sejak update terakhir — supaya
+  render tile OSM (yang jauh lebih berat dari ganti teks) tidak jadi beban
+  CPU/baterai ekstra di atas beban encoding RTMP yang sudah berat.
+- Tombol **"SEMBUNYIKAN PETA" / "TAMPILKAN PETA"** — kalau di HP tertentu
+  performanya masih berat, user/penonton bisa nonaktifkan peta on-the-fly
+  tanpa berhenti live. Saat disembunyikan, `mapView.onPause()` betulan
+  dipanggil (bukan cuma `View.GONE`) supaya thread download tile osmdroid
+  juga berhenti, bukan cuma disembunyikan visual.
+- Cache tile osmdroid diarahkan ke `cacheDir` milik app sendiri (bukan
+  penyimpanan eksternal) — sengaja begini supaya **tidak perlu izin
+  `WRITE_EXTERNAL_STORAGE` sama sekali**, konsisten dengan filosofi app ini
+  yang serba minim izin.
+- `mapView.onResume()` / `onPause()` / `onDetach()` dikaitkan ke lifecycle
+  Activity — ini WAJIB menurut dokumentasi osmdroid, kalau tidak, thread
+  tile download bisa terus jalan di background & memory leak.
+
+### Yang masih perlu diuji langsung (belum bisa dicek di lingkungan ini)
+- Apakah render peta + kamera preview + RTMP encoder jalan bareng tanpa
+  drop frame parah di Redmi A3 asli (3 proses berat sekaligus: encode video,
+  GPS high-accuracy, render tile map).
+- Kebijakan penggunaan tile OSM publik (`tile.openstreetmap.org`) yang
+  dipakai osmdroid secara default itu untuk *penggunaan wajar/ringan*. Kalau
+  nanti dipakai banyak pengguna sekaligus (bukan cuma testing pribadi), ada
+  risiko kena rate-limit dari server OSM. Kalau sampai ke tahap rilis
+  publik/banyak user, pertimbangkan ganti tile source ke penyedia yang
+  membolehkan pemakaian lebih tinggi meski tetap gratis (mis. akun gratis
+  MapTiler/Stadia Maps yang masih ada tier gratisnya, atau self-host tile
+  server sendiri) — untuk sekarang (pengembangan/testing pribadi) tile
+  publik osmdroid sudah cukup.
+- Belum ada penyimpanan/replay rute setelah live selesai (`routeLine` cuma
+  hidup selama Activity hidup, hilang begitu app ditutup) — belum diminta,
+  tapi dicatat kalau nanti relevan.
+
+### Belum dikerjakan (poin #5 — live chat burned-in ke video)
+Ini beda jenis pekerjaan dari live-tracking: butuh compositing OpenGL di atas
+frame kamera SEBELUM di-encode, supaya chat ikut kelihatan oleh penonton
+(bukan cuma di layar HP). RootEncoder punya mekanisme untuk ini
+(`GlObjectStreamingBase` / custom OpenGL filter), tapi ini pekerjaan
+terpisah dan cukup besar (butuh: sumber data chat real-time dari YouTube/
+Twitch API dulu, baru render teksnya ke texture OpenGL). **Belum digarap di
+sesi ini** — kandidat kuat untuk sesi berikutnya setelah live-tracking ini
+dites nyata di device.
+
 ## Yang SENGAJA belum diubah
 - `CONTRIBUTING.md` dan `LICENSE` — sudah masuk akal, tidak ada bug.
 - Belum ada Foreground Service (streaming masih jalan sebagai `Activity`

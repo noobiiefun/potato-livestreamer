@@ -22,8 +22,12 @@ GPS internal HP.
 - **Optimasi Ekstrem Android Go:** encoding video 480p @ 30 FPS, bitrate
   1200 Kbps tetap (jangan dinaikkan — lihat `CONTRIBUTING.md`), agar HP tidak
   *overheating* atau kehabisan RAM.
-- **HUD Speedometer Real-Time:** kecepatan berkendara dalam **km/h**, dari
-  Google Play Services Location (FusedLocationProvider, akurasi tinggi).
+- **Live-Tracking:** kecepatan (km/h) + mini peta rute real-time + marker
+  arah hadap, dari Google Play Services Location (FusedLocationProvider,
+  akurasi tinggi) dipadukan dengan peta [osmdroid](https://github.com/osmdroid/osmdroid)
+  (OpenStreetMap) — **gratis, tanpa API key/akun**, beda dari Google Maps
+  SDK. Peta bisa disembunyikan on-the-fly lewat tombol kalau performa HP
+  terasa berat.
 - **Transmisi RTMP Ringan:** menggunakan [RootEncoder](https://github.com/pedroSG94/RootEncoder)
   (`com.pedro.rtplibrary`), render lewat `OpenGlView`.
 - **Hot-Switch Camera:** balik kamera depan/belakang instan, termasuk saat
@@ -99,12 +103,17 @@ IRL livestreamer/
 ---
 
 ## 🤝 Kontribusi & Roadmap Masa Depan
-- [ ] Integrasi WebSocket untuk menarik pesan *Live Chat* YouTube/Twitch
-      secara real-time ke `RecyclerView` yang sudah disiapkan.
-- [ ] `GlWatermarkObject` agar tulisan HUD kecepatan ikut ter-*render* ke
-      dalam video streaming (saat ini HUD cuma tampil di layar HP, tidak ikut
-      ke penonton).
+- [ ] **Live chat masuk ke dalam video (burned-in)** — bukan cuma tampil di
+      layar HP, tapi ikut ter-*render* ke frame yang dikirim ke penonton.
+      Perlu: (a) sumber data chat real-time via WebSocket/API YouTube atau
+      Twitch, (b) compositing OpenGL di atas frame kamera sebelum encode
+      (`GlObjectStreamingBase` di RootEncoder). Lihat detail di `FIXES.md`.
+- [ ] `GlWatermarkObject` supaya HUD kecepatan & peta ikut ter-*render* ke
+      dalam video streaming (saat ini cuma tampil di layar HP, tidak ikut
+      dilihat penonton).
 - [ ] Fitur *Chroma Key* sederhana untuk avatar VTuber 2D statis.
+- [ ] Simpan/replay rute perjalanan setelah live selesai (saat ini jejak
+      rute hilang begitu app ditutup).
 - [ ] Pindahkan proses streaming ke **Foreground Service** supaya siaran
       tidak berhenti saat layar HP dikunci (saat ini semua logic ada di
       `Activity` biasa — lihat catatan di `FIXES.md`).

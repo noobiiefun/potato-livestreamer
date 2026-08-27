@@ -65,4 +65,9 @@ dependencies {
     // CATATAN: artifact ID sebelumnya salah (":rtmp"), yang benar adalah
     // ":library". Repo JitPack juga wajib dideklarasikan (lihat settings.gradle.kts).
     implementation("com.github.pedroSG94.RootEncoder:library:2.4.3")
+
+    // Peta live-tracking — pakai osmdroid (OpenStreetMap) supaya GRATIS dan
+    // TANPA API key/akun (beda dengan Google Maps SDK yang butuh billing
+    // account & API key). Tile diunduh dari server OSM publik saat online.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
 }
