@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout 
-    xmlns:android="http://android.com"
-    xmlns:app="http://android.com"
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
@@ -9,8 +9,12 @@
     <!-- View Pratinjau Kamera Khusus yang Mendukung Grafik Overlay -->
     <com.pedro.rtplibrary.view.OpenGlView
         android:id="@+id/surfaceView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- HUD Atas: Speedometer GPS Digital -->
     <LinearLayout
@@ -20,13 +24,15 @@
         android:orientation="vertical"
         android:padding="16dp"
         android:background="#40000000"
-        app:layout_top_toTopOf="parent">
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
         <TextView
             android:id="@+id/tvSpeed"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="0 km/h"
+            android:text="@string/hud_speed_default"
             android:textColor="#00FF00"
             android:textSize="46sp"
             android:textStyle="bold" />
@@ -35,7 +41,7 @@
             android:id="@+id/tvStreamStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Status: Terputus"
+            android:text="@string/status_disconnected"
             android:textColor="#FFFFFF"
             android:textSize="14sp" />
     </LinearLayout>
@@ -47,8 +53,8 @@
         android:layout_height="200dp"
         android:layout_margin="16dp"
         android:background="#20000000"
-        app:layout_bottom_toTopOf="@id/layoutControls"
-        app:layout_leading_toLeadingOf="parent" />
+        app:layout_constraintBottom_toTopOf="@id/layoutControls"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <!-- Kontrol Panel Bawah untuk Alamat Server Streaming -->
     <LinearLayout
@@ -58,17 +64,20 @@
         android:orientation="vertical"
         android:padding="12dp"
         android:background="#90000000"
-        app:layout_bottom_toBottomOf="parent">
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
         <EditText
             android:id="@+id/etRtmpUrl"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Masukkan URL RTMP (rtmp://...)"
+            android:hint="@string/hint_rtmp_url"
             android:textColor="#FFFFFF"
             android:textColorHint="#AAAAAA"
             android:textSize="13sp"
-            android:text="rtmp://://youtube.com" />
+            android:inputType="textUri"
+            android:text="@string/default_rtmp_url" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -82,7 +91,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="MULAI LIVE"
+                android:text="@string/btn_start_live"
                 android:backgroundTint="#FF0000" />
 
             <Space
@@ -93,7 +102,7 @@
                 android:id="@+id/btnSwitchCamera"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="BALIK KAMERA"
+                android:text="@string/btn_switch_camera"
                 android:backgroundTint="#333333" />
         </LinearLayout>
     </LinearLayout>

@@ -1,0 +1,25 @@
+<resources>
+    <string name="app_name">Potato IRL Streamer</string>
+
+    <string name="hud_speed_default">0 km/h</string>
+    <string name="hud_speed_format">%1$d km/h</string>
+    <string name="status_disconnected">Status: Terputus</string>
+    <string name="status_connecting">Status: Menghubungkan…</string>
+    <string name="status_live">Status: LIVE STREAMING</string>
+    <string name="status_connect_failed">Status: Koneksi Gagal</string>
+
+    <string name="btn_start_live">MULAI LIVE</string>
+    <string name="btn_stop_live">STOP LIVE</string>
+    <string name="btn_switch_camera">BALIK KAMERA</string>
+
+    <string name="hint_rtmp_url">Masukkan URL RTMP + Stream Key</string>
+    <!-- Sengaja dikosongkan (bukan URL contoh yang salah format seperti versi
+         sebelumnya) supaya pengguna tidak lupa menggantinya sebelum live. -->
+    <string name="default_rtmp_url"></string>
+
+    <string name="error_rtmp_url_empty">URL RTMP wajib diisi</string>
+    <string name="error_encoder_prepare_failed">Gagal menyetel konfigurasi media encoder</string>
+    <string name="error_permissions_required">Aplikasi membutuhkan seluruh izin (kamera, mikrofon, lokasi) untuk berjalan</string>
+    <string name="toast_rtmp_connected">Koneksi RTMP berhasil!</string>
+    <string name="toast_rtmp_failed">Gagal terhubung: %1$s</string>
+</resources>
