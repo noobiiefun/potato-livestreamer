@@ -1,0 +1,42 @@
+# ==== Gradle ====
+.gradle/
+build/
+app/build/
+*.hprof
+
+# ==== Local konfigurasi (JANGAN commit — beda tiap komputer/developer) ====
+local.properties
+
+# ==== Android Studio / IntelliJ ====
+.idea/
+*.iml
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ==== Signing key (JANGAN PERNAH commit keystore/stream key asli) ====
+*.jks
+*.keystore
+keystore.properties
+
+# ==== Log & cache osmdroid (peta) ====
+# Cache tile map disimpan di cacheDir milik app di HP, bukan di repo — tapi
+# kalau pernah ke-generate manual di folder project pas testing, abaikan juga.
+osmdroid/
+
+# ==== OS-specific ====
+.DS_Store
+Thumbs.db
+
+# ==== Output build (APK/AAB hasil compile) ====
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ==== File sensitif per-device (JANGAN commit) ====
+# Kalau suatu saat RTMP URL/stream key default disimpan di file konfigurasi
+# lokal (bukan di strings.xml resmi), pastikan pola file itu ditambahkan di
+# sini juga supaya tidak ke-commit tidak sengaja.
+local.secrets.properties
