@@ -155,6 +155,16 @@
                     android:text="@string/btn_orientation_horizontal"
                     android:textSize="12sp"
                     android:backgroundTint="#333333" />
+
+                <Space android:layout_width="8dp" android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/btnMicSource"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/btn_mic_source"
+                    android:textSize="12sp"
+                    android:backgroundTint="#333333" />
             </LinearLayout>
         </HorizontalScrollView>
     </LinearLayout>

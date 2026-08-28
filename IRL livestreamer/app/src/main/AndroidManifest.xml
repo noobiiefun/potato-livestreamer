@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Cuma dipakai kalau user pilih sumber mic "Bluetooth" di menu Sumber
+         Mic — request izin run-time-nya juga baru dilakukan saat itu, bukan
+         di awal, supaya user yang pakai receiver kabel (mayoritas kasus)
+         tidak perlu approve izin Bluetooth sama sekali. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />

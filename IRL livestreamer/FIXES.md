@@ -222,6 +222,53 @@ visual di HP yang diputar.
   tambahan. Kalau videonya kebalik/miring pas dites, kemungkinan perlu ganti
   parameter rotasi terakhir di `prepareVideo()` (saat ini selalu `0`).
 
+## Fase 5 — Fitur Sumber Mic (Default / Internal / Bluetooth)
+
+Konteks: user pakai mic wireless dengan **receiver fisik** (dicolok ke HP,
+bukan Bluetooth murni), dan minta ada pilihan sumber mic supaya jalur
+Bluetooth (yang lebih berat) cuma aktif kalau benar-benar dipakai.
+
+### Yang dikerjakan
+- Tombol **"Sumber Mic"** baru → dialog radio-button 3 pilihan:
+  1. **Default (otomatis ikut OS)** — cocok untuk receiver kabel USB-C/3.5mm
+     seperti punya user. Ini yang PALING RINGAN karena tidak ada kode
+     tambahan yang jalan — begitu receiver dicolok, Android otomatis
+     prioritaskan itu sebagai sumber input, RootEncoder tinggal menangkap
+     apa pun yang OS anggap sebagai mic aktif.
+  2. **Paksa Mic Internal HP** — buat kondisi mau non-aktifkan eksternal
+     tanpa cabut fisik.
+  3. **Bluetooth** — SATU-SATUNYA pilihan yang benar-benar butuh kode & izin
+     ekstra (`BLUETOOTH_CONNECT`, buka koneksi SCO/`setCommunicationDevice`).
+     Izin run-time-nya **cuma diminta kalau opsi ini dipilih** — user yang
+     pakai receiver kabel (kasus Anda) tidak akan pernah lihat prompt izin
+     Bluetooth sama sekali.
+- Implementasi pakai `AudioManager.setCommunicationDevice()` (API 31+,
+  Android 12+) — ini cara resmi Android buat pilih device audio input
+  tertentu secara eksplisit. Untuk API di bawah itu, fallback ke mekanisme
+  lama (`startBluetoothSco()`) khusus jalur Bluetooth saja.
+- Pilihan tersimpan (`SharedPreferences`) dan diterapkan lagi otomatis tiap
+  app dibuka.
+- Dikunci (disabled) selama live, sama seperti tombol Mode Orientasi — biar
+  konsisten, ganti sumber mic di tengah siaran juga berisiko bikin audio
+  putus/glitch sesaat.
+
+### Yang masih perlu diuji langsung (PENTING — ini area paling belum pasti)
+- **`setCommunicationDevice()` didesain untuk sesi VoIP/komunikasi**, bukan
+  spesifik untuk kasus "merekam & streaming". Secara teori tetap
+  mempengaruhi `AudioRecord`/`MediaRecorder` yang dipakai RootEncoder di
+  balik layar (karena ini murni routing di level OS, di luar kode
+  RootEncoder), tapi **ini BELUM pernah dites nyata** — kemungkinan ada
+  device tertentu yang perilakunya beda dari device lain (fragmentasi
+  Android khas kasus begini).
+- Kalau opsi **Default** sudah otomatis bekerja untuk receiver kabel Anda
+  (kemungkinan besar iya, karena ini standard OS behavior), opsi Internal
+  & Bluetooth ini kemungkinan malah TIDAK akan sering dipakai — tapi tetap
+  disediakan sesuai request.
+- Redmi A3 perlu dicek dulu jalan di Android versi berapa (kalau di bawah
+  Android 12/API 31, cuma jalur Bluetooth fallback lama yang aktif — jalur
+  Default & Internal di versi itu murni ikut default OS, tidak ada kode
+  paksa apa pun).
+
 ## Yang SENGAJA belum diubah
 - `CONTRIBUTING.md` dan `LICENSE` — sudah masuk akal, tidak ada bug.
 - Belum ada Foreground Service (streaming masih jalan sebagai `Activity`

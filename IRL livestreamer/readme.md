@@ -38,6 +38,10 @@ GPS internal HP.
   diterima penonton tidak berubah di tengah siaran).
 - **One-Click Go Live:** URL RTMP terakhir yang dipakai disimpan otomatis,
   jadi sesi berikutnya tinggal buka app dan tekan MULAI LIVE.
+- **Sumber Mic:** pilih Default (otomatis, cocok untuk mic wireless dengan
+  receiver kabel USB-C/3.5mm), Paksa Mic Internal, atau Bluetooth. Jalur
+  Bluetooth (yang lebih berat & butuh izin ekstra) cuma aktif kalau memang
+  dipilih.
 - **Transmisi RTMP Ringan:** menggunakan [RootEncoder](https://github.com/pedroSG94/RootEncoder)
   (`com.pedro.rtplibrary`), render lewat `OpenGlView`.
 - **Hot-Switch Camera:** balik kamera depan/belakang instan, termasuk saat

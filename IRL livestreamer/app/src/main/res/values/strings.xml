@@ -23,6 +23,15 @@
     <string name="map_position_bottom_end">Kanan Bawah</string>
     <string name="toast_orientation_locked">Mode tampilan terkunci selama live — stop dulu untuk ganti</string>
 
+    <string name="btn_mic_source">SUMBER MIC</string>
+    <string name="mic_source_dialog_title">Pilih sumber mic</string>
+    <string name="mic_source_default">Default (otomatis ikut OS — cocok untuk receiver kabel USB-C/3.5mm)</string>
+    <string name="mic_source_internal">Paksa Mic Internal HP</string>
+    <string name="mic_source_bluetooth">Bluetooth (mic wireless tanpa receiver kabel)</string>
+    <string name="toast_mic_source_locked">Sumber mic terkunci selama live — stop dulu untuk ganti</string>
+    <string name="toast_mic_bluetooth_connecting">Menghubungkan mic Bluetooth…</string>
+    <string name="toast_mic_bluetooth_unsupported">HP ini tidak mendukung pemilihan mic Bluetooth langsung (versi Android terlalu lama) — coba pairing manual lewat Pengaturan Bluetooth HP</string>
+
     <string name="hint_rtmp_url">Masukkan URL RTMP + Stream Key</string>
     <!-- Sengaja dikosongkan (bukan URL contoh yang salah format seperti versi
          sebelumnya) supaya pengguna tidak lupa menggantinya sebelum live. -->

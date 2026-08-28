@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.view.MotionEvent
@@ -44,6 +47,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private lateinit var btnToggleMap: Button
     private lateinit var btnMapPosition: Button
     private lateinit var btnOrientationMode: Button
+    private lateinit var btnMicSource: Button
 
     // --- Live-Tracking (peta) ---
     private lateinit var mapView: MapView
@@ -77,6 +81,22 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private val PREF_MAP_MARGIN_TOP_PCT = "map_margin_top_pct"
     private val PREF_RTMP_URL = "last_rtmp_url"
     private val PREF_PORTRAIT_MODE = "is_portrait_mode"
+    private val PREF_MIC_SOURCE = "mic_source"
+    private val MIC_SOURCE_REQUEST_CODE = 102
+
+    /**
+     * DEFAULT: biarkan OS yang urus routing (paling ringan, cocok untuk
+     *          receiver kabel USB-C/3.5mm — OS otomatis prioritaskan input
+     *          kabel begitu ke-detect, tanpa kode tambahan apa pun).
+     * INTERNAL: paksa pakai mic bawaan HP (misalnya kalau user sengaja mau
+     *          matikan mic eksternal tanpa harus cabut fisik).
+     * BLUETOOTH: routing eksplisit ke mic Bluetooth — SATU-SATUNYA mode yang
+     *          butuh kode & izin tambahan (BLUETOOTH_CONNECT, buka koneksi
+     *          SCO). Sengaja dipisah jadi pilihan sendiri (bukan default)
+     *          supaya beban ekstra ini cuma aktif kalau benar-benar dipilih.
+     */
+    private enum class MicSource { DEFAULT, INTERNAL, BLUETOOTH }
+    private var micSource = MicSource.DEFAULT
 
     // --- Mode tampilan: Horizontal (landscape) atau Vertikal (portrait) ---
     // Dipilih SEBELUM live, dan DIKUNCI selama live berlangsung — supaya
@@ -123,6 +143,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         btnToggleMap = findViewById(R.id.btnToggleMap)
         btnMapPosition = findViewById(R.id.btnMapPosition)
         btnOrientationMode = findViewById(R.id.btnOrientationMode)
+        btnMicSource = findViewById(R.id.btnMicSource)
         openGlView = findViewById(R.id.surfaceView)
         mapView = findViewById(R.id.mapView)
 
@@ -133,6 +154,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         uiPrefs.getString(PREF_RTMP_URL, null)?.let { etRtmpUrl.setText(it) }
         isPortraitMode = uiPrefs.getBoolean(PREF_PORTRAIT_MODE, false)
         applyOrientationMode()
+        micSource = MicSource.entries.getOrElse(uiPrefs.getInt(PREF_MIC_SOURCE, 0)) { MicSource.DEFAULT }
+        updateMicSourceButtonLabel()
+        applyMicSource()
 
         setupMap()
         setupDraggableMap()
@@ -149,6 +173,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         btnToggleMap.setOnClickListener { toggleMapVisibility() }
         btnMapPosition.setOnClickListener { showMapPositionDialog() }
         btnOrientationMode.setOnClickListener { onOrientationButtonClicked() }
+        btnMicSource.setOnClickListener { onMicSourceButtonClicked() }
 
         if (checkPermissions()) {
             startLocationTracking()
@@ -367,6 +392,123 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private fun setLiveControlsLocked(locked: Boolean) {
         btnOrientationMode.isEnabled = !locked
         btnOrientationMode.alpha = if (locked) 0.5f else 1f
+        btnMicSource.isEnabled = !locked
+        btnMicSource.alpha = if (locked) 0.5f else 1f
+    }
+
+    // --- Sumber Mic: Default (OS auto) / Paksa Internal / Bluetooth ---
+    private fun onMicSourceButtonClicked() {
+        if (::rtmpCamera.isInitialized && rtmpCamera.isStreaming) {
+            Toast.makeText(this, getString(R.string.toast_mic_source_locked), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val options = arrayOf(
+            getString(R.string.mic_source_default),
+            getString(R.string.mic_source_internal),
+            getString(R.string.mic_source_bluetooth)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.mic_source_dialog_title)
+            .setSingleChoiceItems(options, micSource.ordinal) { dialog, which ->
+                selectMicSource(MicSource.entries[which])
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun selectMicSource(source: MicSource) {
+        // Kalau pilih Bluetooth dan izinnya belum ada (cuma relevan Android 12+
+        // / API 31), minta DULU baru benar-benar apply — supaya user yang
+        // TIDAK pernah pilih Bluetooth tidak pernah lihat prompt izin ini
+        // sama sekali (sesuai permintaan: jangan bebani yang tidak butuh).
+        if (source == MicSource.BLUETOOTH &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), MIC_SOURCE_REQUEST_CODE)
+            return // diterapkan di onRequestPermissionsResult kalau user mengizinkan
+        }
+
+        micSource = source
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putInt(PREF_MIC_SOURCE, source.ordinal)
+            .apply()
+        updateMicSourceButtonLabel()
+        applyMicSource()
+    }
+
+    private fun updateMicSourceButtonLabel() {
+        // Tombol sengaja tetap ringkas ("SUMBER MIC") supaya tidak makan
+        // banyak tempat di baris kontrol — detail pilihan cukup terlihat pas
+        // dialog dibuka (radio button nunjukin yang lagi aktif).
+        btnMicSource.text = getString(R.string.btn_mic_source)
+    }
+
+    /**
+     * Terapkan routing mic sesuai pilihan. Pakai `setCommunicationDevice()`
+     * (API 31+) kalau tersedia — ini cara RESMI & eksplisit buat pilih
+     * perangkat audio input tertentu, bukan cuma nebak dari prioritas OS.
+     * Untuk API di bawah itu, fallback ke mekanisme lama (khusus jalur
+     * Bluetooth SCO) — jalur Default/Internal di API lama dibiarkan
+     * mengikuti default OS karena tidak ada API publik yang reliable untuk
+     * memaksanya (lihat catatan di FIXES.md).
+     */
+    private fun applyMicSource() {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            when (micSource) {
+                MicSource.DEFAULT -> audioManager.clearCommunicationDevice()
+                MicSource.INTERNAL -> {
+                    val builtInMic = audioManager.availableCommunicationDevices
+                        .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+                    builtInMic?.let { audioManager.setCommunicationDevice(it) }
+                }
+                MicSource.BLUETOOTH -> {
+                    val btMic = audioManager.availableCommunicationDevices
+                        .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+                    if (btMic != null) {
+                        Toast.makeText(this, getString(R.string.toast_mic_bluetooth_connecting), Toast.LENGTH_SHORT).show()
+                        audioManager.setCommunicationDevice(btMic)
+                    } else {
+                        Toast.makeText(this, getString(R.string.toast_mic_bluetooth_unsupported), Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        } else {
+            // Fallback Android < 12: cuma jalur Bluetooth yang benar-benar
+            // butuh aksi manual (buka/tutup koneksi SCO). Default & Internal
+            // dibiarkan apa adanya di versi API ini.
+            @Suppress("DEPRECATION")
+            when (micSource) {
+                MicSource.BLUETOOTH -> {
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                    audioManager.startBluetoothSco()
+                    audioManager.isBluetoothScoOn = true
+                }
+                else -> {
+                    if (audioManager.isBluetoothScoOn) {
+                        audioManager.stopBluetoothSco()
+                        audioManager.isBluetoothScoOn = false
+                    }
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                }
+            }
+        }
+    }
+
+    private fun releaseMicRouting() {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.clearCommunicationDevice()
+        } else {
+            @Suppress("DEPRECATION")
+            if (audioManager.isBluetoothScoOn) {
+                audioManager.stopBluetoothSco()
+                audioManager.isBluetoothScoOn = false
+            }
+            audioManager.mode = AudioManager.MODE_NORMAL
+        }
     }
 
     private fun toggleMapVisibility() {
@@ -392,7 +534,13 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_CODE && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
             startLocationTracking()
-        } else {
+        } else if (requestCode == MIC_SOURCE_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                selectMicSource(MicSource.BLUETOOTH)
+            } else {
+                Toast.makeText(this, getString(R.string.error_permissions_required), Toast.LENGTH_SHORT).show()
+            }
+        } else if (requestCode == PERMISSION_REQUEST_CODE) {
             Toast.makeText(this, getString(R.string.error_permissions_required), Toast.LENGTH_LONG).show()
         }
     }
@@ -568,6 +716,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     override fun onDestroy() {
         super.onDestroy()
         longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+        releaseMicRouting()
         locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
         if (::rtmpCamera.isInitialized) {
             if (rtmpCamera.isStreaming) rtmpCamera.stopStream()
