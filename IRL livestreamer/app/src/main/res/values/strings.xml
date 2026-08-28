@@ -13,6 +13,15 @@
     <string name="btn_switch_camera">BALIK KAMERA</string>
     <string name="btn_toggle_map_hide">SEMBUNYIKAN PETA</string>
     <string name="btn_toggle_map_show">TAMPILKAN PETA</string>
+    <string name="btn_map_position">POSISI PETA</string>
+    <string name="btn_orientation_horizontal">MODE: HORIZONTAL</string>
+    <string name="btn_orientation_portrait">MODE: VERTIKAL</string>
+    <string name="map_position_dialog_title">Pilih posisi peta</string>
+    <string name="map_position_top_start">Kiri Atas</string>
+    <string name="map_position_top_end">Kanan Atas</string>
+    <string name="map_position_bottom_start">Kiri Bawah</string>
+    <string name="map_position_bottom_end">Kanan Bawah</string>
+    <string name="toast_orientation_locked">Mode tampilan terkunci selama live — stop dulu untuk ganti</string>
 
     <string name="hint_rtmp_url">Masukkan URL RTMP + Stream Key</string>
     <!-- Sengaja dikosongkan (bukan URL contoh yang salah format seperti versi

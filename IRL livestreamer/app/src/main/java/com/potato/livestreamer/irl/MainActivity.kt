@@ -2,6 +2,8 @@ package com.potato.livestreamer.irl
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Looper
@@ -40,6 +42,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private lateinit var btnStartStream: Button
     private lateinit var btnSwitchCamera: Button
     private lateinit var btnToggleMap: Button
+    private lateinit var btnMapPosition: Button
+    private lateinit var btnOrientationMode: Button
 
     // --- Live-Tracking (peta) ---
     private lateinit var mapView: MapView
@@ -71,6 +75,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private val PREFS_NAME = "irl_ui_prefs"
     private val PREF_MAP_MARGIN_START_PCT = "map_margin_start_pct"
     private val PREF_MAP_MARGIN_TOP_PCT = "map_margin_top_pct"
+    private val PREF_RTMP_URL = "last_rtmp_url"
+    private val PREF_PORTRAIT_MODE = "is_portrait_mode"
+
+    // --- Mode tampilan: Horizontal (landscape) atau Vertikal (portrait) ---
+    // Dipilih SEBELUM live, dan DIKUNCI selama live berlangsung — supaya
+    // orientasi video yang diterima penonton tidak berubah di tengah siaran
+    // (rotasi mid-stream bisa bikin video korup/aneh di sisi penonton).
+    private var isPortraitMode = false
 
     private val REQUIRED_PERMISSIONS = arrayOf(
         Manifest.permission.CAMERA,
@@ -109,8 +121,18 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         btnStartStream = findViewById(R.id.btnStartStream)
         btnSwitchCamera = findViewById(R.id.btnSwitchCamera)
         btnToggleMap = findViewById(R.id.btnToggleMap)
+        btnMapPosition = findViewById(R.id.btnMapPosition)
+        btnOrientationMode = findViewById(R.id.btnOrientationMode)
         openGlView = findViewById(R.id.surfaceView)
         mapView = findViewById(R.id.mapView)
+
+        val uiPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        // "One-click go live": URL RTMP terakhir yang dipakai otomatis
+        // diisikan lagi, jadi sesi berikutnya tinggal tekan MULAI LIVE tanpa
+        // ngetik ulang (mirip alur di potato-monitor-desk).
+        uiPrefs.getString(PREF_RTMP_URL, null)?.let { etRtmpUrl.setText(it) }
+        isPortraitMode = uiPrefs.getBoolean(PREF_PORTRAIT_MODE, false)
+        applyOrientationMode()
 
         setupMap()
         setupDraggableMap()
@@ -125,6 +147,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             if (::rtmpCamera.isInitialized) rtmpCamera.switchCamera()
         }
         btnToggleMap.setOnClickListener { toggleMapVisibility() }
+        btnMapPosition.setOnClickListener { showMapPositionDialog() }
+        btnOrientationMode.setOnClickListener { onOrientationButtonClicked() }
 
         if (checkPermissions()) {
             startLocationTracking()
@@ -266,6 +290,86 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         params.topMargin = (pctTop * maxTop).toInt()
         mapView.layoutParams = params
     }
+
+    /**
+     * Alternatif dari drag manual: pilih salah satu dari 4 pojok layar
+     * lewat dialog — lebih presisi & cocok kalau HP dipasang di tempat yang
+     * bergetar (drag jari kurang reliable dalam situasi begitu).
+     */
+    private fun showMapPositionDialog() {
+        val options = arrayOf(
+            getString(R.string.map_position_top_start),
+            getString(R.string.map_position_top_end),
+            getString(R.string.map_position_bottom_start),
+            getString(R.string.map_position_bottom_end)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.map_position_dialog_title)
+            .setItems(options) { _, which -> moveMapToCorner(which) }
+            .show()
+    }
+
+    private fun moveMapToCorner(cornerIndex: Int) {
+        val parent = mapView.parent as? View ?: return
+        // Tunggu parent benar-benar sudah ada ukurannya (harusnya sudah, tapi
+        // dijaga jaga-jaga kalau dialog dibuka sebelum layout pass pertama selesai).
+        if (parent.width == 0 || parent.height == 0) return
+
+        val maxLeft = parent.width - mapView.width
+        val maxTop = parent.height - mapView.height
+        val margin = (16 * resources.displayMetrics.density).toInt() // ~16dp
+
+        val (left, top) = when (cornerIndex) {
+            0 -> margin to margin // Kiri Atas
+            1 -> (maxLeft - margin) to margin // Kanan Atas
+            2 -> margin to (maxTop - margin) // Kiri Bawah
+            else -> (maxLeft - margin) to (maxTop - margin) // Kanan Bawah
+        }
+
+        val params = mapView.layoutParams as FrameLayout.LayoutParams
+        params.gravity = android.view.Gravity.NO_GRAVITY
+        params.leftMargin = left.coerceIn(0, maxLeft)
+        params.topMargin = top.coerceIn(0, maxTop)
+        mapView.layoutParams = params
+
+        saveMapPosition(params.leftMargin, params.topMargin)
+    }
+
+    // --- Mode tampilan: Horizontal / Vertikal ---
+    private fun onOrientationButtonClicked() {
+        if (::rtmpCamera.isInitialized && rtmpCamera.isStreaming) {
+            Toast.makeText(this, getString(R.string.toast_orientation_locked), Toast.LENGTH_SHORT).show()
+            return
+        }
+        isPortraitMode = !isPortraitMode
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putBoolean(PREF_PORTRAIT_MODE, isPortraitMode)
+            .apply()
+        applyOrientationMode()
+    }
+
+    private fun applyOrientationMode() {
+        requestedOrientation = if (isPortraitMode) {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
+        if (::btnOrientationMode.isInitialized) {
+            btnOrientationMode.text = if (isPortraitMode) {
+                getString(R.string.btn_orientation_portrait)
+            } else {
+                getString(R.string.btn_orientation_horizontal)
+            }
+        }
+    }
+
+    /** Kunci/lepas tombol yang tidak boleh diubah di tengah siaran. */
+    private fun setLiveControlsLocked(locked: Boolean) {
+        btnOrientationMode.isEnabled = !locked
+        btnOrientationMode.alpha = if (locked) 0.5f else 1f
+    }
+
+    private fun toggleMapVisibility() {
         mapVisible = !mapVisible
         mapView.visibility = if (mapVisible) android.view.View.VISIBLE else android.view.View.GONE
         btnToggleMap.text = if (mapVisible) {
@@ -330,13 +434,27 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
                 Toast.makeText(this, getString(R.string.error_rtmp_url_empty), Toast.LENGTH_SHORT).show()
                 return
             }
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                .putString(PREF_RTMP_URL, url)
+                .apply()
 
             tvStreamStatus.text = getString(R.string.status_connecting)
 
-            if (rtmpCamera.prepareVideo(VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS, VIDEO_BITRATE, 0) &&
+            // Mode Vertikal butuh dimensi encode yang ditukar (tinggi > lebar),
+            // bukan cuma diputar visualnya — supaya penonton lihat video native
+            // portrait (mis. 480x854), bukan video landscape yang "dipaksa"
+            // muat di layar vertikal (letterbox/pillarbox).
+            val (encodeWidth, encodeHeight) = if (isPortraitMode) {
+                VIDEO_HEIGHT to VIDEO_WIDTH
+            } else {
+                VIDEO_WIDTH to VIDEO_HEIGHT
+            }
+
+            if (rtmpCamera.prepareVideo(encodeWidth, encodeHeight, VIDEO_FPS, VIDEO_BITRATE, 0) &&
                 rtmpCamera.prepareAudio()
             ) {
                 rtmpCamera.startStream(url)
+                setLiveControlsLocked(true)
             } else {
                 tvStreamStatus.text = getString(R.string.status_disconnected)
                 Toast.makeText(this, getString(R.string.error_encoder_prepare_failed), Toast.LENGTH_SHORT).show()
@@ -345,6 +463,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
             rtmpCamera.stopStream()
             tvStreamStatus.text = getString(R.string.status_disconnected)
             btnStartStream.text = getString(R.string.btn_start_live)
+            setLiveControlsLocked(false)
         }
     }
 
@@ -428,6 +547,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         runOnUiThread {
             tvStreamStatus.text = getString(R.string.status_connect_failed)
             btnStartStream.text = getString(R.string.btn_start_live)
+            setLiveControlsLocked(false)
             Toast.makeText(this, getString(R.string.toast_rtmp_failed, reason), Toast.LENGTH_LONG).show()
         }
     }
@@ -438,6 +558,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         runOnUiThread {
             tvStreamStatus.text = getString(R.string.status_disconnected)
             btnStartStream.text = getString(R.string.btn_start_live)
+            setLiveControlsLocked(false)
         }
     }
 

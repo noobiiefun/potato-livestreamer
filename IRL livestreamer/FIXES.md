@@ -161,6 +161,67 @@ dada, kepala, setang motor, dst).
   kecepatan/live-chat (elemen lain masih posisi tetap by design, sesuai
   scope permintaan sejauh ini).
 
+## Fase 4 — Respon 4 Pertanyaan User (preset posisi, one-click live, mode orientasi)
+
+Konteks: user tanya 4 hal setelah lihat Fase 3. Jawaban singkat + status
+pengerjaan tiap poin:
+
+**1. Apakah drag berat buat Android Go?**
+Drag itu sendiri ringan (cuma hitung angka + geser margin, bukan proses
+kamera/GPU). Tapi drag pakai jari kurang presisi & agak riskan dipakai pas
+live (apalagi HP dipasang di kendaraan yang bergetar). **Solusi:** ditambah
+dialog **"Posisi Peta"** — pilih salah satu dari 4 pojok (Kiri Atas/Kanan
+Atas/Kiri Bawah/Kanan Bawah), sekali tap langsung pindah tanpa perlu kontrol
+jari halus. Drag manual tetap ada sebagai opsi buat yang mau atur lebih
+bebas.
+
+**2. One-click go live (mirip potato-monitor-desk)?**
+✅ Sudah bisa. URL RTMP terakhir yang dipakai disimpan otomatis
+(`SharedPreferences`) dan diisikan lagi tiap app dibuka — jadi sesi
+berikutnya tinggal buka app, tekan **MULAI LIVE**, tanpa ngetik ulang.
+
+**3. Mic wireless untuk IRL?**
+⬜ **Belum dikerjakan** — sengaja ditunda karena implementasinya beda
+tergantung JENIS mic wireless yang dipakai:
+- Kit dengan penerima USB-C/3.5mm (mis. DJI Mic, Rode Wireless GO, Boya,
+  Hollyland Lark) → plug-and-play, Android otomatis mendeteksinya sebagai
+  mic eksternal biasa, kemungkinan besar TIDAK butuh kode tambahan sama
+  sekali (auto-routing OS).
+- Mic Bluetooth murni (tanpa kabel/receiver fisik ke HP) → BUTUH kode
+  tambahan (`AudioManager.startBluetoothSco()`), dan kualitas suaranya
+  biasanya jauh lebih rendah (mode Bluetooth SCO itu narrowband, ~8kHz,
+  didesain untuk telepon bukan broadcast).
+Perlu tahu dulu jenis mic yang dipakai sebelum implementasi diambil arahnya.
+
+**4. Mode Vertikal & Horizontal?**
+✅ Sudah bisa. Tombol **"Mode: Horizontal/Vertikal"** ditambahkan — dipilih
+SEBELUM live, dan **DIKUNCI otomatis selama live** (tombol jadi disabled +
+transparan, ada toast kalau dipaksa tekan). Ini disengaja: ganti orientasi
+di TENGAH siaran bisa bikin video korup/aneh di sisi penonton, karena
+resolusi encode (lebar x tinggi) yang dikirim ke RTMP server juga ikut
+ditukar (mis. 854x480 landscape jadi 480x854 portrait) — bukan cuma
+visual di HP yang diputar.
+
+### Perubahan teknis
+- `AndroidManifest.xml`: `android:screenOrientation="portrait"` yang tadinya
+  fixed di-lepas — sekarang dikontrol penuh dari kode
+  (`requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_...`), supaya
+  bisa gonta-ganti mode.
+- Layout kontrol bawah dirombak: tombol Start jadi full-width baris sendiri
+  (paling gampang dijangkau), tombol sekunder (Balik Kamera/Peta/Posisi
+  Peta/Mode) dipindah ke baris `HorizontalScrollView` di bawahnya —
+  supaya tidak numpuk/kepotong di layar sempit Android Go sekarang ada 4
+  tombol sekunder.
+- `onStartStreamClicked()`: dimensi encode (`prepareVideo`) ditukar
+  (width↔height) sesuai mode yang dipilih.
+
+### Yang masih perlu diuji langsung
+- Belum ada verifikasi nyata apakah RootEncoder/RTMP server tujuan (YouTube/
+  Twitch) menerima metadata portrait dengan benar dari kombinasi
+  width<height + rotation=0 seperti ini, atau butuh parameter rotasi
+  tambahan. Kalau videonya kebalik/miring pas dites, kemungkinan perlu ganti
+  parameter rotasi terakhir di `prepareVideo()` (saat ini selalu `0`).
+
 ## Yang SENGAJA belum diubah
 - `CONTRIBUTING.md` dan `LICENSE` — sudah masuk akal, tidak ada bug.
 - Belum ada Foreground Service (streaming masih jalan sebagai `Activity`

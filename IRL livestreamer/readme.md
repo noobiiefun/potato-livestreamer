@@ -29,10 +29,15 @@ GPS internal HP.
   SDK. Peta bisa disembunyikan on-the-fly lewat tombol kalau performa HP
   terasa berat.
 - **Atur Posisi Peta:** tekan-tahan mini-peta lalu geser ke posisi mana pun
-  di layar — cocok karena tiap orang punya preferensi pemasangan HP yang
-  beda saat IRL (dada, kepala, setang motor, dst). Latar belakang **selalu
-  kamera full-screen**, apa pun posisi peta yang dipilih. Posisi tersimpan
-  otomatis, dipulihkan tiap app dibuka lagi.
+  di layar, ATAU pakai tombol **"Posisi Peta"** untuk pilih instan salah
+  satu dari 4 pojok (lebih presisi, cocok kalau HP dipasang di tempat yang
+  bergetar). Latar belakang **selalu kamera full-screen**, apa pun posisi
+  peta yang dipilih. Posisi tersimpan otomatis.
+- **Mode Vertikal / Horizontal:** pilih sebelum live lewat satu tombol —
+  otomatis terkunci begitu live dimulai (supaya orientasi video yang
+  diterima penonton tidak berubah di tengah siaran).
+- **One-Click Go Live:** URL RTMP terakhir yang dipakai disimpan otomatis,
+  jadi sesi berikutnya tinggal buka app dan tekan MULAI LIVE.
 - **Transmisi RTMP Ringan:** menggunakan [RootEncoder](https://github.com/pedroSG94/RootEncoder)
   (`com.pedro.rtplibrary`), render lewat `OpenGlView`.
 - **Hot-Switch Camera:** balik kamera depan/belakang instan, termasuk saat

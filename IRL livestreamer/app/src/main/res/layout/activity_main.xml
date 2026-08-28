@@ -14,7 +14,8 @@
     <!-- Kamera WAJIB paling belakang & full-screen — semua elemen lain
          (HUD, peta, chat, kontrol) adalah overlay DI ATASNYA. Ini yang
          bikin cocok untuk IRL livestreaming: apa pun posisi overlay yang
-         dipilih user, penonton tetap lihat kamera penuh sebagai latar. -->
+         dipilih user, penonton tetap lihat kamera penuh sebagai latar,
+         baik mode Horizontal maupun Vertikal. -->
     <com.pedro.rtplibrary.view.OpenGlView
         android:id="@+id/surfaceView"
         android:layout_width="match_parent"
@@ -49,9 +50,10 @@
     </LinearLayout>
 
     <!-- Live-Tracking: mini peta OpenStreetMap (osmdroid) — posisi + arah +
-         jejak rute. Posisi default pojok kanan atas, tapi BISA DIGESER
-         bebas oleh user (tekan-tahan lalu geser) — lihat setupDraggableMap()
-         di MainActivity.kt. Posisi terakhir disimpan otomatis. -->
+         jejak rute. Posisi default pojok kanan atas. Bisa dipindah 2 cara:
+         (1) tekan-tahan lalu geser bebas — setupDraggableMap(), atau
+         (2) tombol "Posisi Peta" → pilih salah satu dari 4 pojok instan,
+         lebih presisi & tidak butuh kontrol jari halus. -->
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
         android:layout_width="150dp"
@@ -71,9 +73,10 @@
         android:layout_marginBottom="96dp"
         android:background="#20000000" />
 
-    <!-- Kontrol Panel Bawah untuk Alamat Server Streaming — POSISI TETAP,
-         sengaja tidak ikut bisa digeser supaya tombol Start/Stop selalu
-         gampang dijangkau & tidak ketutup elemen lain saat live. -->
+    <!-- Kontrol Panel Bawah — POSISI TETAP, sengaja tidak ikut bisa digeser
+         supaya tombol Start/Stop selalu gampang dijangkau. Tombol sekunder
+         (Balik Kamera, Peta, dst.) dibungkus HorizontalScrollView supaya
+         tidak numpuk/kepotong di layar sempit Android Go. -->
     <LinearLayout
         android:id="@+id/layoutControls"
         android:layout_width="match_parent"
@@ -94,43 +97,66 @@
             android:inputType="textUri"
             android:text="@string/default_rtmp_url" />
 
-        <LinearLayout
+        <!-- Tombol utama: full-width, paling gampang dijangkau -->
+        <Button
+            android:id="@+id/btnStartStream"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginTop="6dp">
+            android:layout_marginTop="6dp"
+            android:text="@string/btn_start_live"
+            android:backgroundTint="#FF0000" />
 
-            <Button
-                android:id="@+id/btnStartStream"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/btn_start_live"
-                android:backgroundTint="#FF0000" />
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:scrollbars="none">
 
-            <Space
-                android:layout_width="12dp"
-                android:layout_height="wrap_content" />
-
-            <Button
-                android:id="@+id/btnSwitchCamera"
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/btn_switch_camera"
-                android:backgroundTint="#333333" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <Space
-                android:layout_width="12dp"
-                android:layout_height="wrap_content" />
+                <Button
+                    android:id="@+id/btnSwitchCamera"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/btn_switch_camera"
+                    android:textSize="12sp"
+                    android:backgroundTint="#333333" />
 
-            <Button
-                android:id="@+id/btnToggleMap"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/btn_toggle_map_hide"
-                android:backgroundTint="#333333" />
-        </LinearLayout>
+                <Space android:layout_width="8dp" android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/btnToggleMap"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/btn_toggle_map_hide"
+                    android:textSize="12sp"
+                    android:backgroundTint="#333333" />
+
+                <Space android:layout_width="8dp" android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/btnMapPosition"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/btn_map_position"
+                    android:textSize="12sp"
+                    android:backgroundTint="#333333" />
+
+                <Space android:layout_width="8dp" android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/btnOrientationMode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/btn_orientation_horizontal"
+                    android:textSize="12sp"
+                    android:backgroundTint="#333333" />
+            </LinearLayout>
+        </HorizontalScrollView>
     </LinearLayout>
 
 </FrameLayout>
