@@ -5,8 +5,11 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Looper
+import android.view.MotionEvent
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -52,6 +55,23 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private val MAP_UPDATE_MIN_DISTANCE_M = 8f
     private val MAP_DEFAULT_ZOOM = 17.0
 
+    // --- Atur posisi peta (drag & drop) ---
+    // Tekan-tahan (long press) dulu baru geser — supaya tap biasa (tanpa
+    // sengaja menyenggol peta pas live) tidak memindahkan posisinya.
+    private val LONG_PRESS_MS = 350L
+    private val DRAG_TOUCH_SLOP_PX = 24f
+    private var isDraggingMap = false
+    private var longPressArmed = false
+    private var downRawX = 0f
+    private var downRawY = 0f
+    private var downMarginStart = 0
+    private var downMarginTop = 0
+    private val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var longPressRunnable: Runnable? = null
+    private val PREFS_NAME = "irl_ui_prefs"
+    private val PREF_MAP_MARGIN_START_PCT = "map_margin_start_pct"
+    private val PREF_MAP_MARGIN_TOP_PCT = "map_margin_top_pct"
+
     private val REQUIRED_PERMISSIONS = arrayOf(
         Manifest.permission.CAMERA,
         Manifest.permission.RECORD_AUDIO,
@@ -93,6 +113,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         mapView = findViewById(R.id.mapView)
 
         setupMap()
+        setupDraggableMap()
 
         rtmpCamera = RtmpCamera2(openGlView, this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -131,7 +152,120 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         mapView.overlays.add(positionMarker)
     }
 
-    private fun toggleMapVisibility() {
+    /**
+     * Fitur "atur posisi live-tracking": mini-peta bisa digeser bebas ke
+     * mana pun di layar, dengan latar kamera tetap full-screen di
+     * belakangnya (background TIDAK ikut bergerak — cuma overlay peta).
+     *
+     * Interaksi: TEKAN-TAHAN peta [LONG_PRESS_MS] dulu baru bisa digeser.
+     * Ini sengaja, bukan drag-langsung, supaya jari yang cuma numpang
+     * lewat/menyenggol peta saat live tidak tiba-tiba memindahkan posisinya.
+     * Gestur navigasi bawaan osmdroid (pan/zoom peta itu sendiri) dimatikan
+     * karena peta ini murni tampilan otomatis (auto-center ke lokasi user),
+     * bukan peta yang dijelajahi manual — jadi seluruh sentuhan aman
+     * diklaim untuk drag-reposisi.
+     */
+    private fun setupDraggableMap() {
+        mapView.setMultiTouchControls(false)
+        mapView.setOnTouchListener { view, event ->
+            val params = view.layoutParams as FrameLayout.LayoutParams
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downRawX = event.rawX
+                    downRawY = event.rawY
+                    // PENTING: posisi AWAL peta ditentukan lewat
+                    // gravity="top|end" + marginEnd di XML, BUKAN leftMargin
+                    // (yang defaultnya 0 kalau belum pernah digeser). Jadi
+                    // titik awal drag harus dibaca dari view.left/view.top
+                    // (posisi piksel aktual hasil layout), bukan dari
+                    // params.leftMargin/topMargin — kalau salah baca dari situ,
+                    // geseran pertama akan "melompat" ke pojok kiri-atas.
+                    downMarginStart = view.left
+                    downMarginTop = view.top
+                    isDraggingMap = false
+                    longPressArmed = false
+                    val runnable = Runnable {
+                        longPressArmed = true
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    }
+                    longPressRunnable = runnable
+                    longPressHandler.postDelayed(runnable, LONG_PRESS_MS)
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - downRawX
+                    val dy = event.rawY - downRawY
+                    if (!longPressArmed) {
+                        // Belum "diaktifkan" jadi mode-geser: kalau jari sudah
+                        // bergerak jauh sebelum long-press kepenuhan waktunya,
+                        // batalkan (anggap ini scroll/tap biasa, bukan drag).
+                        if (kotlin.math.abs(dx) > DRAG_TOUCH_SLOP_PX || kotlin.math.abs(dy) > DRAG_TOUCH_SLOP_PX) {
+                            longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                        }
+                        return@setOnTouchListener true
+                    }
+                    isDraggingMap = true
+                    val parent = view.parent as View
+                    val newLeft = (downMarginStart + dx).toInt()
+                        .coerceIn(0, parent.width - view.width)
+                    val newTop = (downMarginTop + dy).toInt()
+                        .coerceIn(0, parent.height - view.height)
+                    params.leftMargin = newLeft
+                    params.topMargin = newTop
+                    params.gravity = android.view.Gravity.NO_GRAVITY
+                    view.layoutParams = params
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                    if (isDraggingMap) {
+                        saveMapPosition(params.leftMargin, params.topMargin)
+                    }
+                    isDraggingMap = false
+                    longPressArmed = false
+                    true
+                }
+                else -> false
+            }
+        }
+
+        // Pulihkan posisi peta yang disimpan sesi sebelumnya. Ditunda lewat
+        // `post {}` karena ukuran parent (buat hitung batas geser & posisi
+        // dari persentase layar) baru pasti akurat setelah layout pass
+        // pertama selesai.
+        mapView.post { restoreMapPosition() }
+    }
+
+    private fun saveMapPosition(leftMarginPx: Int, topMarginPx: Int) {
+        val parent = mapView.parent as? View ?: return
+        val maxLeft = (parent.width - mapView.width).coerceAtLeast(1)
+        val maxTop = (parent.height - mapView.height).coerceAtLeast(1)
+        // Disimpan sebagai persentase (bukan pixel mentah) supaya posisi
+        // tetap masuk akal walau nanti dites di HP dengan resolusi berbeda.
+        val pctStart = leftMarginPx.toFloat() / maxLeft
+        val pctTop = topMarginPx.toFloat() / maxTop
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putFloat(PREF_MAP_MARGIN_START_PCT, pctStart)
+            .putFloat(PREF_MAP_MARGIN_TOP_PCT, pctTop)
+            .apply()
+    }
+
+    private fun restoreMapPosition() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (!prefs.contains(PREF_MAP_MARGIN_START_PCT)) return // belum pernah digeser, pakai posisi default XML
+
+        val parent = mapView.parent as? View ?: return
+        val maxLeft = (parent.width - mapView.width).coerceAtLeast(1)
+        val maxTop = (parent.height - mapView.height).coerceAtLeast(1)
+        val pctStart = prefs.getFloat(PREF_MAP_MARGIN_START_PCT, 0f)
+        val pctTop = prefs.getFloat(PREF_MAP_MARGIN_TOP_PCT, 0f)
+
+        val params = mapView.layoutParams as FrameLayout.LayoutParams
+        params.gravity = android.view.Gravity.NO_GRAVITY
+        params.leftMargin = (pctStart * maxLeft).toInt()
+        params.topMargin = (pctTop * maxTop).toInt()
+        mapView.layoutParams = params
+    }
         mapVisible = !mapVisible
         mapView.visibility = if (mapVisible) android.view.View.VISIBLE else android.view.View.GONE
         btnToggleMap.text = if (mapVisible) {
@@ -312,6 +446,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     override fun onDestroy() {
         super.onDestroy()
+        longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
         locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
         if (::rtmpCamera.isInitialized) {
             if (rtmpCamera.isStreaming) rtmpCamera.stopStream()

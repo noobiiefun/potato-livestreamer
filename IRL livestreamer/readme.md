@@ -28,6 +28,11 @@ GPS internal HP.
   (OpenStreetMap) — **gratis, tanpa API key/akun**, beda dari Google Maps
   SDK. Peta bisa disembunyikan on-the-fly lewat tombol kalau performa HP
   terasa berat.
+- **Atur Posisi Peta:** tekan-tahan mini-peta lalu geser ke posisi mana pun
+  di layar — cocok karena tiap orang punya preferensi pemasangan HP yang
+  beda saat IRL (dada, kepala, setang motor, dst). Latar belakang **selalu
+  kamera full-screen**, apa pun posisi peta yang dipilih. Posisi tersimpan
+  otomatis, dipulihkan tiap app dibuka lagi.
 - **Transmisi RTMP Ringan:** menggunakan [RootEncoder](https://github.com/pedroSG94/RootEncoder)
   (`com.pedro.rtplibrary`), render lewat `OpenGlView`.
 - **Hot-Switch Camera:** balik kamera depan/belakang instan, termasuk saat

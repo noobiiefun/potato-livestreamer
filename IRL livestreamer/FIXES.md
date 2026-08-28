@@ -110,6 +110,57 @@ Twitch API dulu, baru render teksnya ke texture OpenGL). **Belum digarap di
 sesi ini** — kandidat kuat untuk sesi berikutnya setelah live-tracking ini
 dites nyata di device.
 
+## Fase 3 — Fitur Atur Posisi Live-Tracking (drag mini-peta)
+
+Konteks: user mau bisa atur posisi mini-peta di layar (mis. pindah dari
+pojok kanan-atas ke pojok lain), tapi latar belakang **wajib tetap kamera
+full-screen** — sangat relevan buat IRL livestreaming karena setiap orang
+punya preferensi tata letak HUD yang beda (tergantung dipasang di mana:
+dada, kepala, setang motor, dst).
+
+### Perubahan struktural
+- **Root layout diganti dari `ConstraintLayout` ke `FrameLayout`.** Ini
+  BUKAN sekadar gaya — `ConstraintLayout` akan selalu menarik ulang child ke
+  constraint yang didefinisikan di XML setiap layout pass, jadi kalau tetap
+  dipakai, posisi hasil drag lewat kode gampang "ketarik balik" ke posisi
+  constraint semula. `FrameLayout` murni mengandalkan `LayoutParams`
+  (margin/gravity) yang kita kontrol penuh dari kode.
+- Kamera (`OpenGlView`) jadi child PERTAMA & `match_parent` — otomatis jadi
+  latar paling belakang untuk semua overlay lain di atasnya (HUD, peta,
+  chat, kontrol). Ini yang menjamin "latar belakang wajib kamera full"
+  sesuai permintaan, apa pun posisi overlay yang dipilih user.
+
+### Cara kerja drag
+- **Tekan-tahan dulu (long press, 350ms), baru bisa digeser** — sengaja
+  BUKAN drag-langsung, supaya jari yang cuma numpang lewat/menyenggol peta
+  pas lagi live tidak sengaja memindahkan posisinya. ada toleransi gerak
+  kecil (`DRAG_TOUCH_SLOP_PX`) sebelum long-press dianggap batal (dianggap
+  scroll/tap biasa).
+- Gestur bawaan osmdroid (pan/zoom manual peta) DIMATIKAN
+  (`setMultiTouchControls(false)`) — masuk akal karena peta ini murni
+  tampilan otomatis (auto-center ke lokasi live), bukan peta yang dijelajah
+  manual. Jadi semua sentuhan di area peta aman diklaim penuh untuk
+  drag-reposisi tanpa konflik gestur.
+- **Posisi tersimpan otomatis** (`SharedPreferences`, sebagai PERSENTASE
+  layar, bukan pixel mentah) — supaya tetap masuk akal kalau dites di HP
+  lain dengan resolusi beda. Dipulihkan otomatis tiap app dibuka lagi.
+- **Bug yang sempat saya tangkap sebelum kepakai:** posisi default peta di
+  XML pakai `gravity="top|end"` + `marginEnd`, BUKAN `leftMargin` — jadi
+  kalau titik awal drag dibaca dari `params.leftMargin` (defaultnya 0),
+  geseran pertama bakal "melompat" ke pojok kiri-atas dulu sebelum ngikutin
+  jari. Diperbaiki dengan baca posisi awal dari `view.left`/`view.top`
+  (posisi piksel aktual hasil layout), bukan dari nilai margin di
+  `LayoutParams`.
+
+### Yang masih perlu diuji langsung
+- Rasa "enak"-nya durasi long-press 350ms & radius toleransi geser — ini
+  angka tebakan awal, mungkin perlu disesuaikan setelah dicoba di device
+  fisik (terutama kalau device terpasang di kendaraan yang bergetar, getaran
+  bisa ke-anggap gerakan jari kalau radius toleransi kekecilan).
+- Interaksi drag ini cuma diterapkan ke **mini-peta**, belum ke HUD
+  kecepatan/live-chat (elemen lain masih posisi tetap by design, sesuai
+  scope permintaan sejauh ini).
+
 ## Yang SENGAJA belum diubah
 - `CONTRIBUTING.md` dan `LICENSE` — sudah masuk akal, tidak ada bug.
 - Belum ada Foreground Service (streaming masih jalan sebagai `Activity`
