@@ -1,0 +1,23 @@
+# Task List - Merge IRL Livestreamer and Potato Monitor Desk
+
+- `[x]` Configure Build and Dependencies
+    - `[x]` Update `app/build.gradle.kts` with merged dependencies and ABI filters
+    - `[x]` Ensure `settings.gradle.kts` has JitPack repository
+- `[x]` Resource Preparation
+    - `[x]` Rename `activity_main.xml` to `activity_irl_main.xml`
+    - `[x]` Create `activity_selection.xml`
+    - `[x]` Port `activity_relay_main.xml` (from monitor desk client)
+    - `[x]` Port `network_security_config.xml` and `potato_logo.png`
+- `[x]` Source Code Integration - IRL Component
+    - `[x]` Move `MainActivity.kt` to `com.potato.livestreamer.irl.IrlMainActivity`
+    - `[x]` Update `IrlMainActivity.kt` with new layout reference
+- `[x]` Source Code Integration - Relay Component
+    - `[x]` Port `RelayMainActivity.kt` (formerly `MainActivity.kt`)
+    - `[x]` Port `RelayStreamService.kt`, `LiveStreamService.kt`, `ControlClient.kt`, `TcpDataSource.kt`, `LivePrefs.kt`, and `speedtest` package
+- `[x]` Unified Entry Point
+    - `[x]` Create `ModeSelectionActivity.kt`
+- `[x]` Manifest and Finalization
+    - `[x]` Update `AndroidManifest.xml` with all activities, services, and permissions
+- `[x]` Verification
+    - `[x]` Build project
+    - `[ ]` Run on device (Manual verification required)

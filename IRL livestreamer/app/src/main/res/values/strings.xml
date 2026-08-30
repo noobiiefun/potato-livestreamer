@@ -42,4 +42,18 @@
     <string name="error_permissions_required">Aplikasi membutuhkan seluruh izin (kamera, mikrofon, lokasi) untuk berjalan</string>
     <string name="toast_rtmp_connected">Koneksi RTMP berhasil!</string>
     <string name="toast_rtmp_failed">Gagal terhubung: %1$s</string>
+
+    <!-- Selection Menu -->
+    <string name="selection_title">Pilih Mode Potato</string>
+    <string name="btn_mode_pc">PC Mode (Potato Monitor Desk)</string>
+    <string name="btn_mode_irl">IRL Mode (Livestreamer)</string>
+    <string name="version_label">v1.0.0 (Go Edition Optimized)</string>
+
+    <!-- Relay Mode -->
+    <string name="status_connecting_pc">Menghubungkan ke PC...</string>
+    <string name="btn_reconnect">Reconnect</string>
+    <string name="label_live">LIVE</string>
+    <string name="desc_preview_pc">Preview layar PC</string>
+    <string name="desc_settings">Pengaturan</string>
+    <string name="desc_minimize">Minimize</string>
 </resources>

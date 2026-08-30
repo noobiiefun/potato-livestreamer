@@ -20,10 +20,11 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.potato.livestreamer.R
 import com.google.android.gms.location.*
 import com.pedro.common.ConnectChecker
-import com.pedro.rtplibrary.view.OpenGlView
-import com.pedro.rtplibrary.rtmp.RtmpCamera2
+import com.pedro.library.view.OpenGlView
+import com.pedro.library.rtmp.RtmpCamera2
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -32,7 +33,7 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
 
-class MainActivity : AppCompatActivity(), ConnectChecker {
+class IrlMainActivity : AppCompatActivity(), ConnectChecker {
 
     private lateinit var rtmpCamera: RtmpCamera2
     private lateinit var openGlView: OpenGlView
@@ -133,7 +134,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         Configuration.getInstance().osmdroidTileCache = File(cacheDir, "osmdroid/tiles")
 
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_irl_main)
 
         tvSpeed = findViewById(R.id.tvSpeed)
         tvStreamStatus = findViewById(R.id.tvStreamStatus)

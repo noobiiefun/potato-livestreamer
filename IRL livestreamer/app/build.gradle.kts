@@ -6,17 +6,17 @@ plugins {
 android {
     // Disamakan dengan modul android-app (potato-livestreamer utama) supaya
     // gampang digabung sebagai satu app dua "mode" di masa depan.
-    namespace = "com.potato.livestreamer.irl"
+    namespace = "com.potato.livestreamer"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.potato.livestreamer.irl"
+        applicationId = "com.potato.livestreamer"
         // API 26 (Android 8.0) adalah syarat minimum Android Go Edition,
         // sesuai yang ditulis di readme.
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
 
         // PENTING untuk HP Android Go (mis. Xiaomi Redmi A3): banyak HP kelas
         // ini menjalankan sistem 32-bit-only walau chipnya 64-bit-capable,
@@ -53,21 +53,20 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-
-    // Dipakai oleh slot Live Chat (RecyclerView) di layout — sebelumnya
-    // dependency ini hilang padahal sudah dipakai di activity_main.xml.
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     // Google Play Services untuk Tracking GPS Real-Time
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
-    // RTMP Streaming Engine (RootEncoder / pedroSG94).
-    // CATATAN: artifact ID sebelumnya salah (":rtmp"), yang benar adalah
-    // ":library". Repo JitPack juga wajib dideklarasikan (lihat settings.gradle.kts).
-    implementation("com.github.pedroSG94.RootEncoder:library:2.4.3")
+    // Media3 ExoPlayer untuk decode + render video/audio MPEG-TS (Mode Relay/PC)
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-common:1.4.1")
+    implementation("androidx.media3:media3-extractor:1.4.1")
 
-    // Peta live-tracking — pakai osmdroid (OpenStreetMap) supaya GRATIS dan
-    // TANPA API key/akun (beda dengan Google Maps SDK yang butuh billing
-    // account & API key). Tile diunduh dari server OSM publik saat online.
+    // RTMP Streaming Engine (RootEncoder / pedroSG94).
+    implementation("com.github.pedroSG94.RootEncoder:library:2.5.4")
+
+    // Peta live-tracking — pakai osmdroid (OpenStreetMap)
     implementation("org.osmdroid:osmdroid-android:6.1.20")
 }
